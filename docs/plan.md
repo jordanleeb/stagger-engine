@@ -1,7 +1,7 @@
 # Stagger Engine Plan
 
 ## Phase 1
-- [ ] Entity allocator
+- [*] Entity allocator
 - [ ] Component registry
 - [ ] Basic world structure
 
