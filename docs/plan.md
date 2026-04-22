@@ -5,11 +5,13 @@
 - [*] Component registry
 - [*] Basic world structure
 
-## Phase 2
-- [ ] Archetype signatures
-- [ ] Archetype entity rows
-- [ ] Component columns
-- [ ] World archetype map
+## Phase 2 (refined)
+- [*] Archetype signatures
+- [*] Archetype entity storage
+- [ ] Component storage (columns)
+- [ ] Entity location tracking
+- [ ] World archetype management
+- [ ] Moving entities between archetypes
 - [ ] Queries
 - [ ] Systems
 
