@@ -73,7 +73,10 @@ impl World {
 mod tests {
     use super::*;
 
-    struct Position;
+    struct Position {
+        x: f32,
+        y: f32,
+    }
 
     #[test]
     fn spawn_creates_alive_entity() {
@@ -116,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn destorying_twice_fails() {
+    fn destroying_twice_fails() {
         let mut world = World::new();
         let e = world.spawn();
 

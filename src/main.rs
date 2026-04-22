@@ -1,3 +1,4 @@
+mod column;
 mod component;
 mod entity;
 mod world;

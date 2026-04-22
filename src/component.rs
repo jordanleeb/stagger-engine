@@ -1,3 +1,4 @@
+use crate::column::ComponentInfo;
 use std::any::TypeId;
 use std::collections::HashMap;
 
@@ -6,7 +7,7 @@ pub type ComponentId = u32;
 
 /// Registers component types and assigns them unique IDs.
 ///
-/// Maps Rust types (`T`) to a compact runtime `ComponentId` values.
+/// Maps Rust types (`T`) to compact runtime `ComponentId` values.
 ///
 /// This allows the ECS to:
 /// - Refer to component types at runtime.
@@ -18,6 +19,14 @@ pub type ComponentId = u32;
 pub struct ComponentRegistry {
     /// Maps Rust `TypeId` values to internal component IDs.
     type_to_id: HashMap<TypeId, ComponentId>,
+
+    /// Stores metadata for each registered component ID.
+    ///
+    /// The index corresponds directly to the numeric `ComponentId`,
+    /// so `info_by_id[id as usize]` returns that component's metadata.
+    ///
+    /// This relies on component IDs being assigned sequentially starting at 0.
+    info_by_id: Vec<ComponentInfo>,
 
     /// The next unused component ID.
     next_id: ComponentId,
@@ -36,6 +45,7 @@ impl ComponentRegistry {
     pub fn new() -> Self {
         Self {
             type_to_id: HashMap::new(),
+            info_by_id: Vec::new(),
             next_id: 0,
         }
     }
@@ -60,6 +70,7 @@ impl ComponentRegistry {
         self.next_id += 1;
 
         self.type_to_id.insert(type_id, id);
+        self.info_by_id.push(ComponentInfo::new::<T>(id));
 
         id
     }
@@ -78,14 +89,21 @@ impl ComponentRegistry {
     pub fn contains<T: 'static>(&self) -> bool {
         self.get::<T>().is_some()
     }
+
+    /// Returns metadata for a registered component ID.
+    ///
+    /// Returns `None` if the ID is invalid or unregistered.
+    pub fn info(&self, id: ComponentId) -> Option<&ComponentInfo> {
+        self.info_by_id.get(id as usize)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    struct A;
-    struct B;
+    struct A(u8);
+    struct B(u8);
 
     #[test]
     fn registering_same_type_returns_same_id() {
@@ -164,5 +182,40 @@ mod tests {
         reg.register::<A>();
 
         assert_eq!(reg.contains::<A>(), reg.get::<A>().is_some());
+    }
+
+    #[test]
+    fn register_stores_component_info() {
+        let mut reg = ComponentRegistry::new();
+        let id = reg.register::<A>();
+
+        let info = reg.info(id).unwrap();
+
+        assert_eq!(info.id(), id);
+        assert_eq!(info.type_id(), TypeId::of::<A>());
+        assert_eq!(info.layout(), std::alloc::Layout::new::<A>());
+    }
+
+    #[test]
+    fn info_returns_none_for_invalid_id() {
+        let reg = ComponentRegistry::new();
+        assert!(reg.info(999).is_none());
+    }
+
+    #[test]
+    fn info_returns_correct_metadata_for_multiple_types() {
+        let mut reg = ComponentRegistry::new();
+
+        let a_id = reg.register::<A>();
+        let b_id = reg.register::<B>();
+
+        let a_info = reg.info(a_id).unwrap();
+        let b_info = reg.info(b_id).unwrap();
+
+        assert_eq!(a_info.id(), a_id);
+        assert_eq!(a_info.type_id(), TypeId::of::<A>());
+
+        assert_eq!(b_info.id(), b_id);
+        assert_eq!(b_info.type_id(), TypeId::of::<B>());
     }
 }

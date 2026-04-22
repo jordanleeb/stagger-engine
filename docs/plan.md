@@ -8,7 +8,7 @@
 ## Phase 2
 - [x] Archetype signatures
 - [x] Archetype entity storage
-- [ ] Component storage
+- [x] Component storage
 - [ ] Entity location tracking
 - [ ] World archetype management
 - [ ] Entity movement between archetypes
