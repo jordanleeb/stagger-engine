@@ -2,7 +2,7 @@
 
 ## Phase 1
 - [*] Entity allocator
-- [ ] Component registry
+- [*] Component registry
 - [ ] Basic world structure
 
 ## Phase 2
