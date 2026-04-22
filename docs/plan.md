@@ -6,7 +6,10 @@
 - [*] Basic world structure
 
 ## Phase 2
-- [ ] Archetypes
+- [ ] Archetype signatures
+- [ ] Archetype entity rows
+- [ ] Component columns
+- [ ] World archetype map
 - [ ] Queries
 - [ ] Systems
 
