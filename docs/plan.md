@@ -1,17 +1,17 @@
 # Stagger Engine Plan
 
 ## Phase 1
-- [*] Entity allocator
-- [*] Component registry
-- [*] Basic world structure
+- [x] Entity allocator
+- [x] Component registry
+- [x] Basic world structure
 
-## Phase 2 (refined)
-- [*] Archetype signatures
-- [*] Archetype entity storage
-- [ ] Component storage (columns)
+## Phase 2
+- [x] Archetype signatures
+- [x] Archetype entity storage
+- [ ] Component storage
 - [ ] Entity location tracking
 - [ ] World archetype management
-- [ ] Moving entities between archetypes
+- [ ] Entity movement between archetypes
 - [ ] Queries
 - [ ] Systems
 
@@ -19,3 +19,12 @@
 - [ ] Physics engine
 - [ ] Ragdoll prototype
 - [ ] Balance controller
+
+## Phase 4
+- [ ] ECS-integrated rendering architecture
+- [ ] Window and event loop
+- [ ] Renderer backend
+- [ ] Transform-driven rendering
+- [ ] Camera component and render system
+- [ ] Debug rendering
+- [ ] Mesh and material components
