@@ -9,7 +9,7 @@
 - [x] Archetype signatures
 - [x] Archetype entity storage
 - [x] Component storage
-- [ ] Entity location tracking
+- [x] Entity location tracking
 - [ ] World archetype management
 - [ ] Entity movement between archetypes
 - [ ] Queries

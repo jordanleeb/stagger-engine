@@ -1,5 +1,6 @@
 use crate::component::{ComponentId, ComponentRegistry};
 use crate::entity::{Entity, EntityAllocator};
+use crate::location::EntityLocation;
 
 /// Owns the core ECS state.
 ///
@@ -12,6 +13,7 @@ use crate::entity::{Entity, EntityAllocator};
 pub struct World {
     entities: EntityAllocator,
     components: ComponentRegistry,
+    entity_locations: Vec<Option<EntityLocation>>,
 }
 
 impl Default for World {
@@ -26,17 +28,30 @@ impl World {
         Self {
             entities: EntityAllocator::new(),
             components: ComponentRegistry::new(),
+            entity_locations: Vec::new(),
         }
     }
 
-    // Spawns a new entity.
+    /// Spawns a new entity.
     pub fn spawn(&mut self) -> Entity {
-        self.entities.create()
+        let entity = self.entities.create();
+        self.ensure_entity_slot(entity);
+        entity
     }
 
     /// Destroys an entity.
     pub fn destroy(&mut self, entity: Entity) -> bool {
-        self.entities.destroy(entity)
+        if !self.entities.destroy(entity) {
+            return false;
+        }
+
+        let index = entity.index as usize;
+
+        if let Some(slot) = self.entity_locations.get_mut(index) {
+            *slot = None;
+        }
+
+        true
     }
 
     /// Returns `true` if the entity is currently alive.
@@ -66,7 +81,60 @@ impl World {
     pub fn clear(&mut self) {
         self.entities.clear();
         self.components = ComponentRegistry::new();
+        self.entity_locations.clear();
     }
+
+    fn ensure_entity_slot(&mut self, entity: Entity) {
+        let index = entity.index as usize;
+
+        if index >= self.entity_locations.len() {
+            self.entity_locations.resize(index + 1, None);
+        }
+    }
+
+    /// Returns the stored location of an entity, if any.
+    pub fn location(&self, entity: Entity) -> Option<EntityLocation> {
+        if !self.is_alive(entity) {
+            return None;
+        }
+
+        let index = entity.index as usize;
+        self.entity_locations.get(index).copied().flatten()
+    }
+
+    /// Sets the location of an entity.
+    /// 
+    /// Returns `false` if the entity is not alive.
+    pub fn set_location(&mut self, entity: Entity, location: EntityLocation) -> bool {
+        if !self.is_alive(entity) {
+            return false;
+        }
+
+        self.ensure_entity_slot(entity);
+
+        let index = entity.index as usize;
+        self.entity_locations[index] = Some(location);
+        true
+    }
+
+    /// Clears the stored location of an entity.
+    /// 
+    /// Returns `false` if the entity is not alive.
+    pub fn clear_location(&mut self, entity: Entity) -> bool {
+        if !self.is_alive(entity) {
+            return false;
+        }
+
+        let index = entity.index as usize;
+
+        if let Some(slot) = self.entity_locations.get_mut(index) {
+            *slot = None;
+            return true;
+        }
+
+        false
+    }
+
 }
 
 #[cfg(test)]
@@ -125,5 +193,69 @@ mod tests {
 
         assert!(world.destroy(e));
         assert!(!world.destroy(e));
+    }
+
+    #[test]
+    fn spawned_entity_has_no_location_initially() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        assert_eq!(world.location(e), None);
+    }
+
+    #[test]
+    fn can_set_and_get_entity_location() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        let location = EntityLocation::new(2, 5);
+
+        assert!(world.set_location(e, location));
+        assert_eq!(world.location(e), Some(location));
+    }
+
+    #[test]
+    fn clear_location_removes_stored_location() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        let location = EntityLocation::new(1, 3);
+
+        assert!(world.set_location(e, location));
+        assert_eq!(world.location(e), Some(location));
+
+        assert!(world.clear_location(e));
+        assert_eq!(world.location(e), None);
+    }
+
+    #[test]
+    fn destroy_clears_entity_location() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        assert!(world.set_location(e, EntityLocation::new(0, 0)));
+        assert!(world.destroy(e));
+        assert_eq!(world.location(e), None);
+    }
+
+    #[test]
+    fn cannot_set_location_for_dead_entity() {
+        let mut world = World::new();
+        let e = world.spawn();
+        assert!(world.destroy(e));
+
+        assert!(!world.set_location(e, EntityLocation::new(0, 0)));
+        assert_eq!(world.location(e), None);
+    }
+
+    #[test]
+    fn clear_resets_locations() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        assert!(world.set_location(e, EntityLocation::new(4, 2)));
+        world.clear();
+
+        assert_eq!(world.location(e), None);
     }
 }
