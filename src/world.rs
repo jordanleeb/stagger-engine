@@ -265,11 +265,13 @@ mod tests {
     }
 
     #[test]
-    fn spawned_entity_has_no_location_initially() {
+    fn spawned_entity_has_location_in_empty_archetype() {
         let mut world = World::new();
         let e = world.spawn();
 
-        assert_eq!(world.location(e), None);
+        let location = world.location(e).unwrap();
+        assert_eq!(location.archetype(), world.empty_archetype_id());
+        assert_eq!(location.row(), 0);
     }
 
     #[test]
