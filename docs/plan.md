@@ -10,7 +10,7 @@
 - [x] Archetype entity storage
 - [x] Component storage
 - [x] Entity location tracking
-- [ ] World archetype management
+- [x] World archetype management
 - [ ] Entity movement between archetypes
 - [ ] Queries
 - [ ] Systems

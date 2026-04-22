@@ -1,19 +1,39 @@
 use crate::component::{ComponentId, ComponentRegistry};
 use crate::entity::{Entity, EntityAllocator};
 use crate::location::EntityLocation;
+use crate::archetype::{Archetype, ArchetypeId, ArchetypeSignature};
 
 /// Owns the core ECS state.
 ///
-/// For now, the world is responsible for:
+/// The world is responsible for:
 /// - Allocating and destroying entities.
 /// - Tracking entity liveness.
 /// - Registering component types.
-///
-/// Later, it will also own component storage and archetypes.
+/// - Owning all archetypes and their entity storage.
+/// - Tracking the location of each enitty within archetypes.
+/// 
+/// Entities are stored in archetypes based on their component sets.
+/// Each enity has an associated [`EntityLocation`] that identifies
+/// which archetype it belongs to and which row it occupies.
+/// 
+/// # Invariants
+/// 
+/// - Every alive entity exists in exactly one archetype.
+/// - `entity_locations[index]` matches the entity's actual position.
+/// - Archetype storage is dense; removal use swap-remove.
+/// - When swap-remove moves an entity, its location is updated.
+/// 
+/// # Notes
+/// 
+/// Component data is not yet stored in archetypes. This will be added
+/// in a later phase, along with support for moving entities between
+/// archetypes when components are added or removed.
 pub struct World {
     entities: EntityAllocator,
     components: ComponentRegistry,
     entity_locations: Vec<Option<EntityLocation>>,
+    archetypes: Vec<Archetype>,
+    empty_archetype: ArchetypeId,
 }
 
 impl Default for World {
@@ -25,10 +45,14 @@ impl Default for World {
 impl World {
     /// Creates a new, empty world.
     pub fn new() -> Self {
+        let empty_archetype = Archetype::new(ArchetypeSignature::new(vec![]));
+
         Self {
             entities: EntityAllocator::new(),
             components: ComponentRegistry::new(),
             entity_locations: Vec::new(),
+            archetypes: vec![empty_archetype],
+            empty_archetype: 0,
         }
     }
 
@@ -36,22 +60,48 @@ impl World {
     pub fn spawn(&mut self) -> Entity {
         let entity = self.entities.create();
         self.ensure_entity_slot(entity);
+
+        let empty_id = self.empty_archetype;
+        let row = self.archetypes[empty_id as usize].push_entity(entity);
+
+        let location = EntityLocation::new(empty_id, row);
+        self.entity_locations[entity.index as usize] = Some(location);
+
         entity
     }
 
     /// Destroys an entity.
     pub fn destroy(&mut self, entity: Entity) -> bool {
-        if !self.entities.destroy(entity) {
+        if !self.is_alive(entity) {
             return false;
         }
 
-        let index = entity.index as usize;
+        let location = match self.location(entity) {
+            Some(location) => location,
+            None => return false,
+        };
 
-        if let Some(slot) = self.entity_locations.get_mut(index) {
-            *slot = None;
+        let archetype_id = location.archetype();
+        let row = location.row();
+
+        let archetype = &mut self.archetypes[archetype_id as usize];
+        let removed = archetype.remove_entity_row(row);
+
+        debug_assert_eq!(removed, entity);
+
+        // Handle swap-remove: update moved entity
+        if row < archetype.len() {
+            let moved_entity = archetype.entities()[row];
+            let moved_index = moved_entity.index as usize;
+            self.entity_locations[moved_index] = Some(EntityLocation::new(archetype_id, row));
         }
 
-        true
+        // Clear location
+        let index = entity.index as usize;
+        self.entity_locations[index] = None;
+
+        // Finally destroy in allocator
+        self.entities.destroy(entity)
     }
 
     /// Returns `true` if the entity is currently alive.
@@ -82,6 +132,9 @@ impl World {
         self.entities.clear();
         self.components = ComponentRegistry::new();
         self.entity_locations.clear();
+        self.archetypes.clear();
+        self.archetypes.push(Archetype::new(ArchetypeSignature::new(vec![])));
+        self.empty_archetype = 0;
     }
 
     fn ensure_entity_slot(&mut self, entity: Entity) {
@@ -135,10 +188,26 @@ impl World {
         false
     }
 
+    /// Returns the number of archetypes in the world.
+    pub fn archetype_count(&self) -> usize {
+        self.archetypes.len()
+    }
+
+    /// Returns the ID of the empty archetype.
+    pub fn empty_archetype_id(&self) -> ArchetypeId {
+        self.empty_archetype
+    }
+
+    /// Returns an archetype by ID.
+    pub fn archetype(&self, id: ArchetypeId) -> Option<&Archetype> {
+        self.archetypes.get(id as usize)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
 
     struct Position {
@@ -257,5 +326,83 @@ mod tests {
         world.clear();
 
         assert_eq!(world.location(e), None);
+    }
+
+    #[test]
+    fn world_starts_with_one_empty_archetype() {
+        let world = World::new();
+
+        assert_eq!(world.archetype_count(), 1);
+
+        let empty = world.archetype(world.empty_archetype_id()).unwrap();
+        assert!(empty.signature().component_ids().is_empty());
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn spawn_places_entity_in_empty_archetype() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        let location = world.location(e).unwrap();
+        assert_eq!(location.archetype(), world.empty_archetype_id());
+        assert_eq!(location.row(), 0);
+
+        let empty = world.archetype(world.empty_archetype_id()).unwrap();
+        assert_eq!(empty.entities(), &[e]);
+    }
+
+    #[test]
+    fn multiple_spawns_fill_empty_archetype_rows() {
+        let mut world = World::new();
+
+        let e1 = world.spawn();
+        let e2 = world.spawn();
+
+        let l1 = world.location(e1).unwrap();
+        let l2 = world.location(e2).unwrap();
+
+        assert_eq!(l1.archetype(), world.empty_archetype_id());
+        assert_eq!(l2.archetype(), world.empty_archetype_id());
+
+        assert_eq!(l1.row(), 0);
+        assert_eq!(l2.row(), 1);
+
+        let empty = world.archetype(world.empty_archetype_id()).unwrap();
+        assert_eq!(empty.entities(), &[e1, e2]);
+    }
+
+    #[test]
+    fn destroy_removes_entity_from_empty_archetype() {
+        let mut world = World::new();
+
+        let e1 = world.spawn();
+        let e2 = world.spawn();
+
+        assert!(world.destroy(e1));
+        assert!(!world.is_alive(e1));
+        assert_eq!(world.location(e1), None);
+
+        let empty = world.archetype(world.empty_archetype_id()).unwrap();
+        assert_eq!(empty.len(), 1);
+        assert_eq!(empty.entities(), &[e2]);
+
+        let l2 = world.location(e2).unwrap();
+        assert_eq!(l2.archetype(), world.empty_archetype_id());
+        assert_eq!(l2.row(), 0);
+    }
+
+    #[test]
+    fn clear_recreates_empty_archetype() {
+        let mut world = World::new();
+
+        world.spawn();
+        world.clear();
+
+        assert_eq!(world.archetype_count(), 1);
+
+        let empty = world.archetype(world.empty_archetype_id()).unwrap();
+        assert!(empty.signature().component_ids().is_empty());
+        assert!(empty.is_empty());
     }
 }
