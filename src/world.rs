@@ -10,17 +10,17 @@ use crate::archetype::{Archetype, ArchetypeId, ArchetypeSignature};
 /// - Tracking entity liveness.
 /// - Registering component types.
 /// - Owning all archetypes and their entity storage.
-/// - Tracking the location of each enitty within archetypes.
+/// - Tracking the location of each entity within archetypes.
 /// 
 /// Entities are stored in archetypes based on their component sets.
-/// Each enity has an associated [`EntityLocation`] that identifies
+/// Each entity has an associated [`EntityLocation`] that identifies
 /// which archetype it belongs to and which row it occupies.
 /// 
 /// # Invariants
 /// 
 /// - Every alive entity exists in exactly one archetype.
 /// - `entity_locations[index]` matches the entity's actual position.
-/// - Archetype storage is dense; removal use swap-remove.
+/// - Archetype storage is dense; removals use swap-remove.
 /// - When swap-remove moves an entity, its location is updated.
 /// 
 /// # Notes
@@ -56,7 +56,7 @@ impl World {
         }
     }
 
-    /// Spawns a new entity.
+    /// Spawns a new entity and places it into the empty archetype.
     pub fn spawn(&mut self) -> Entity {
         let entity = self.entities.create();
         self.ensure_entity_slot(entity);
@@ -71,6 +71,9 @@ impl World {
     }
 
     /// Destroys an entity.
+    /// 
+    /// Removes it from its archetype, updates any entity moved by
+    /// swap-remove, clears its location, and invalidates the handle.
     pub fn destroy(&mut self, entity: Entity) -> bool {
         if !self.is_alive(entity) {
             return false;
@@ -202,12 +205,92 @@ impl World {
     pub fn archetype(&self, id: ArchetypeId) -> Option<&Archetype> {
         self.archetypes.get(id as usize)
     }
+
+    fn find_archetype_by_signature(&self, signature: &ArchetypeSignature) -> Option<ArchetypeId> {
+        self.archetypes
+            .iter()
+            .position(|archetype| archetype.signature() == signature)
+            .map(|index| index as ArchetypeId)
+    }
+
+    fn find_or_create_archetype(&mut self, signature: ArchetypeSignature) -> ArchetypeId {
+        if let Some(id) = self.find_archetype_by_signature(&signature) {
+            return id;
+        }
+
+        let id = self.archetypes.len() as ArchetypeId;
+        self.archetypes.push(Archetype::new(signature));
+        id
+    }
+
+    fn move_entity_to_archetype(
+        &mut self,
+        entity: Entity,
+        destination_archetype: ArchetypeId,
+    ) -> bool {
+        if !self.is_alive(entity) {
+            return false;
+        }
+
+        let source_location = match self.location(entity) {
+            Some(location) => location,
+            None => return false,
+        };
+
+        let source_archetype = source_location.archetype();
+        let source_row = source_location.row();
+
+        if source_archetype == destination_archetype {
+            return true;
+        }
+
+        // Remove from source archetype
+        let removed = {
+            let archetype = &mut self.archetypes[source_archetype as usize];
+            archetype.remove_entity_row(source_row)
+        };
+
+        debug_assert_eq!(removed, entity);
+
+        // If swap-remove moved another entity into the old row,
+        // update that entity's location.
+        let source_len = self.archetypes[source_archetype as usize].len();
+        if source_row < source_len {
+            let moved_entity = self.archetypes[source_archetype as usize].entities()[source_row];
+            let moved_index = moved_entity.index as usize;
+
+            self.entity_locations[moved_index] = 
+                Some(EntityLocation::new(source_archetype, source_row));
+        }
+
+        // Insert into destination archetype.
+        let destination_row = {
+            let archetype = &mut self.archetypes[destination_archetype as usize];
+            archetype.push_entity(entity)
+        };
+
+        let entity_index = entity.index as usize;
+        self.entity_locations[entity_index] = 
+            Some(EntityLocation::new(destination_archetype, destination_row));
+
+        true
+    }
+
+    /// Moves an entity into the archetype identified by `signature`.
+    /// 
+    /// Creates the destination archetype if it does not yet exist.
+    pub fn move_entity_by_signature(
+        &mut self,
+        entity: Entity,
+        signature: ArchetypeSignature,
+    ) -> bool {
+        let destination = self.find_or_create_archetype(signature);
+        self.move_entity_to_archetype(entity, destination)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
 
     struct Position {
@@ -406,5 +489,85 @@ mod tests {
         let empty = world.archetype(world.empty_archetype_id()).unwrap();
         assert!(empty.signature().component_ids().is_empty());
         assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn moving_entity_creates_destination_archetype() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        let signature = ArchetypeSignature::new(vec![1]);
+
+        assert!(world.move_entity_by_signature(e, signature.clone()));
+        assert_eq!(world.archetype_count(), 2);
+
+        let location = world.location(e).unwrap();
+        let archetype = world.archetype(location.archetype()).unwrap();
+
+        assert_eq!(archetype.signature(), &signature);
+        assert_eq!(archetype.entities(), &[e]);
+    }
+
+    #[test]
+    fn moving_entity_updates_location() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        let signature = ArchetypeSignature::new(vec![1, 2]);
+
+        assert!(world.move_entity_by_signature(e, signature));
+
+        let location = world.location(e).unwrap();
+        assert_ne!(location.archetype(), world.empty_archetype_id());
+        assert_eq!(location.row(), 0);
+    }
+
+    #[test]
+    fn moving_entity_updates_swapped_source_entity_location() {
+        let mut world = World::new();
+
+        let e1 = world.spawn();
+        let e2 = world.spawn();
+        let e3 = world.spawn();
+
+        let destination_signature = ArchetypeSignature::new(vec![42]);
+
+        // Move middle entity out of the empty archetype.
+        assert!(world.move_entity_by_signature(e2, destination_signature));
+
+        let empty = world.archetype(world.empty_archetype_id()).unwrap();
+        assert_eq!(empty.len(), 2);
+        assert!(empty.entities().contains(&e1));
+        assert!(empty.entities().contains(&e3));
+
+        let e3_location = world.location(e3).unwrap();
+        assert_eq!(e3_location.archetype(), world.empty_archetype_id());
+
+        // Because of swap-remove, e3 should now occupy row 1.
+        assert_eq!(e3_location.row(), 1);
+    }
+
+    #[test]
+    fn moving_entity_to_same_archetype_is_no_op() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        let before = world.location(e).unwrap();
+        assert!(world.move_entity_by_signature(e, ArchetypeSignature::new(vec![])));
+
+        let after = world.location(e).unwrap();
+        assert_eq!(before, after);
+
+        let empty = world.archetype(world.empty_archetype_id()).unwrap();
+        assert_eq!(empty.entities(), &[e]);
+    }
+
+    #[test]
+    fn dead_entity_cannot_be_moved() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        assert!(world.destroy(e));
+        assert!(!world.move_entity_by_signature(e, ArchetypeSignature::new(vec![1])));
     }
 }
