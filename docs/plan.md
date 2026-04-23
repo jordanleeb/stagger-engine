@@ -12,6 +12,8 @@
 - [x] Entity location tracking
 - [x] World archetype management
 - [x] Entity movement between archetypes
+- [ ] Component column integration
+- [ ] Add/remove component API
 - [ ] Queries
 - [ ] Systems
 
