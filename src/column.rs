@@ -5,6 +5,7 @@ use std::ptr::NonNull;
 use crate::component::ComponentId;
 
 /// Metadata describing a registered component type.
+#[derive(Clone)]
 pub struct ComponentInfo {
     /// Runtime ID for this component type.
     id: ComponentId,
@@ -17,6 +18,10 @@ pub struct ComponentInfo {
 
     /// Function used to drop one initialized value of this component type.
     drop_fn: unsafe fn(*mut u8),
+
+    /// Function used to move one initialized value from source storage
+    /// to destination storage of the same component type.
+    move_fn: unsafe fn(*mut u8, *mut u8),
 }
 
 impl ComponentInfo {
@@ -33,6 +38,7 @@ impl ComponentInfo {
             type_id: TypeId::of::<T>(),
             layout: Layout::new::<T>(),
             drop_fn: drop_ptr::<T>,
+            move_fn: move_ptr::<T>,
         }
     }
 
@@ -64,6 +70,11 @@ impl ComponentInfo {
     /// Returns the alignment of this component type in bytes.
     pub fn align(&self) -> usize {
         self.layout.align()
+    }
+
+    /// Returns the function used to move one stored component value.
+    pub fn move_fn(&self) -> unsafe fn(*mut u8, *mut u8) {
+        self.move_fn
     }
 }
 
@@ -223,6 +234,210 @@ impl Column {
             Some(removed)
         }
     }
+
+    /// Returns `true` if this column stores the same component type as `other`.
+    pub fn has_same_type(&self, other: &Column) -> bool {
+        self.info.type_id() == other.info.type_id()
+    }
+
+    /// Returns the component ID stored in this column.
+    pub fn component_id(&self) -> ComponentId {
+        self.info.id()
+    }
+
+    fn reserve_one(&mut self) {
+        if self.len == self.capacity {
+            self.grow();
+        }
+    }
+
+    /// Moves the element at `index` from this column into the end of `destination`.
+    ///
+    /// This removes the source element using swap-remove semantics and appends it
+    /// to the destination column.
+    ///
+    /// Returns `false` if the index is out of bounds or the column types differ.
+    pub fn move_element_to(&mut self, index: usize, destination: &mut Column) -> bool {
+        if index >= self.len {
+            return false;
+        }
+
+        if !self.has_same_type(destination) {
+            return false;
+        }
+
+        destination.reserve_one();
+
+        let last_index = self.len - 1;
+
+        unsafe {
+            let src_ptr = self.element_ptr(index);
+            let dst_ptr = destination.element_ptr(destination.len);
+
+            // Move the removed element into the destination.
+            (self.info.move_fn())(src_ptr, dst_ptr);
+            destination.len += 1;
+
+            // If we removed a non-last row, move the last source element down
+            // into the vacated slot.
+            if index != last_index {
+                let last_ptr = self.element_ptr(last_index);
+                (self.info.move_fn())(last_ptr, src_ptr);
+            }
+
+            self.len -= 1;
+        }
+
+        true
+    }
+
+    /// Removes the element at `index` using swap-remove and drops it.
+    ///
+    /// Returns `false` if `index` is out of bounds.
+    pub fn swap_remove_and_drop(&mut self, index: usize) -> bool {
+        if index >= self.len {
+            return false;
+        }
+
+        let last_index = self.len - 1;
+
+        unsafe {
+            let removed_ptr = self.element_ptr(index);
+
+            if index != last_index {
+                let last_ptr = self.element_ptr(last_index);
+
+                // Drop the removed element first.
+                (self.info.drop_fn())(removed_ptr);
+
+                // Move the last element into the vacated slot.
+                (self.info.move_fn())(last_ptr, removed_ptr);
+            } else {
+                (self.info.drop_fn())(removed_ptr);
+            }
+
+            self.len -= 1;
+        }
+
+        true
+    }
+
+    /// Moves the element at `index` into the end of `destination` without
+    /// compacting or shrinking the source column.
+    ///
+    /// After this call:
+    /// - The destination has one additional initialized element.
+    /// - The source slot at `index` is now logically uninitialized.
+    /// - The source column length is unchanged.
+    ///
+    /// This is intended for archetype-level row transfer, where compaction is
+    /// handled later in a separate pass so all columns stay row-consistent.
+    ///
+    /// Returns `false` if:
+    /// - `index` is out of bounds.
+    /// - The columns store different component types.
+    pub fn move_to_other_without_compacting(
+        &mut self,
+        index: usize,
+        destination: &mut Column,
+    ) -> bool {
+        if index >= self.len {
+            return false;
+        }
+
+        if !self.has_same_type(destination) {
+            return false;
+        }
+
+        destination.reserve_one();
+
+        unsafe {
+            let src_ptr = self.element_ptr(index);
+            let dst_ptr = destination.element_ptr(destination.len);
+
+            // Move the initialized value into the destination.
+            (self.info.move_fn())(src_ptr, dst_ptr);
+            destination.len += 1;
+        }
+
+        true
+    }
+
+    /// Drops the element at `index` in place without compacting or shrinking
+    /// the column.
+    ///
+    /// After this call:
+    /// - The slot at `index` is logically uninitialized.
+    /// - The column length is unchanged.
+    ///
+    /// The caller is responsible for either:
+    /// - Overwriting the hole with the last element, then shrinking.
+    /// - Shrinking if `index` was already the last row.
+    ///
+    /// Returns `false` if `index` is out of bounds.
+    pub fn drop_in_place_at(&mut self, index: usize) -> bool {
+        if index >= self.len {
+            return false;
+        }
+
+        unsafe {
+            let ptr = self.element_ptr(index);
+            (self.info.drop_fn())(ptr);
+        }
+
+        true
+    }
+
+    /// Overwrites `target_index` with the current last element without changing
+    /// the logical length.
+    ///
+    /// This is the column-level half of archetype swap-remove.
+    /// It assumes the caller has already made `target_index` logically
+    /// uninitialized by either:
+    /// - Moving its value out.
+    /// - Dropping it in place.
+    ///
+    /// If `target_index` is already the last row, this is a no-op.
+    ///
+    /// Returns `false` if `target_index` is out of bounds.
+    pub fn overwrite_with_last(&mut self, target_index: usize) -> bool {
+        if target_index >= self.len {
+            return false;
+        }
+
+        let last_index = self.len - 1;
+
+        if target_index == last_index {
+            return true;
+        }
+
+        unsafe {
+            let last_ptr = self.element_ptr(last_index);
+            let target_ptr = self.element_ptr(target_index);
+
+            // Move the last initialized value into the hole at target_index.
+            (self.info.move_fn())(last_ptr, target_ptr);
+        }
+
+        true
+    }
+
+    /// Shrinks the logical length of the column by one.
+    ///
+    /// This should be called only after the caller has already handled the old
+    /// last row correctly, either by:
+    /// - Moving it into a hole.
+    /// - Deciding it was the removed row.
+    ///
+    /// Returns `false` if the column is already empty.
+    pub fn shrink_len_by_one(&mut self) -> bool {
+        if self.len == 0 {
+            return false;
+        }
+
+        self.len -= 1;
+        true
+    }
 }
 
 impl Drop for Column {
@@ -250,6 +465,21 @@ impl Drop for Column {
 unsafe fn drop_ptr<T>(ptr: *mut u8) {
     unsafe {
         ptr.cast::<T>().drop_in_place();
+    }
+}
+
+/// Moves a value of type `T` from `src` to `dst`
+///
+/// # Safety
+///
+/// - `src` must point to a valid initialized `T`.
+/// - `dst` must be valid writable storage for `T`.
+/// - `src` and `dst` must be properly aligned for `T`.
+/// - `dst` must not currently hold an initialized `T`.
+unsafe fn move_ptr<T>(src: *mut u8, dst: *mut u8) {
+    let value = unsafe { src.cast::<T>().read() };
+    unsafe {
+        dst.cast::<T>().write(value);
     }
 }
 
@@ -388,5 +618,34 @@ mod tests {
         struct Marker;
 
         let _ = ComponentInfo::new::<Marker>(0);
+    }
+
+    #[test]
+    fn move_element_to_moves_value_between_columns() {
+        let mut source = Column::new(ComponentInfo::new::<u32>(0));
+        let mut destination = Column::new(ComponentInfo::new::<u32>(0));
+
+        source.push(10_u32);
+        source.push(20_u32);
+        source.push(30_u32);
+
+        assert!(source.move_element_to(1, &mut destination));
+
+        assert_eq!(source.len(), 2);
+        assert_eq!(destination.len(), 1);
+
+        assert_eq!(destination.get::<u32>(0), Some(&20_u32));
+        assert!(source.get::<u32>(0) == Some(&10_u32));
+        assert!(source.get::<u32>(1) == Some(&30_u32));
+    }
+
+    #[test]
+    fn move_element_to_rejects_type_mismatch() {
+        let mut source = Column::new(ComponentInfo::new::<u32>(0));
+        let mut destination = Column::new(ComponentInfo::new::<f32>(1));
+
+        source.push(10_u32);
+
+        assert!(!source.move_element_to(0, &mut destination));
     }
 }

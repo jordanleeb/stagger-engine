@@ -1,9 +1,9 @@
+mod archetype;
 mod column;
 mod component;
 mod entity;
-mod world;
-mod archetype;
 mod location;
+mod world;
 
 fn main() {
     println!("Hello, world!");

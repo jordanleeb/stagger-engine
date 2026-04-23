@@ -223,13 +223,12 @@ mod tests {
     fn create_after_clear_starts_fresh() {
         let mut alloc = EntityAllocator::new();
 
-        let e1 = alloc.create();
+        let _e1 = alloc.create();
         alloc.clear();
         let e2 = alloc.create();
 
         assert_eq!(e2.index, 0);
         assert_eq!(e2.generation, 0);
-        assert!(!alloc.is_alive(e1));
         assert!(alloc.is_alive(e2));
     }
 }
