@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::archetype::{Archetype, ArchetypeId, ArchetypeSignature, RowMoveResult};
 use crate::column::Column;
 use crate::component::{ComponentId, ComponentRegistry};
@@ -31,6 +33,12 @@ pub struct World {
     entity_locations: Vec<Option<EntityLocation>>,
     archetypes: Vec<Archetype>,
     empty_archetype: ArchetypeId,
+
+    /// Maps each archetype's component ID set to its index in `archetypes`.
+    /// 
+    /// This allows `find_archetype_by_signature` to run in O(1) rather than
+    /// scanning every archetype on every structural change.
+    archetype_index: HashMap<Vec<ComponentId>, ArchetypeId>,
 }
 
 impl Default for World {
@@ -45,12 +53,16 @@ impl World {
         let empty_signature = ArchetypeSignature::new(vec![]);
         let empty_archetype = Archetype::new(empty_signature, vec![]);
 
+        let mut archetype_index = HashMap::new();
+        archetype_index.insert(vec![], 0);
+
         Self {
             entities: EntityAllocator::new(),
             components: ComponentRegistry::new(),
             entity_locations: Vec::new(),
             archetypes: vec![empty_archetype],
             empty_archetype: 0,
+            archetype_index,
         }
     }
 
@@ -138,6 +150,8 @@ impl World {
         self.archetypes
             .push(Archetype::new(ArchetypeSignature::new(vec![]), vec![]));
         self.empty_archetype = 0;
+        self.archetype_index.clear();
+        self.archetype_index.insert(vec![], 0);
     }
 
     fn ensure_entity_slot(&mut self, entity: Entity) {
@@ -207,10 +221,10 @@ impl World {
     }
 
     fn find_archetype_by_signature(&self, signature: &ArchetypeSignature) -> Option<ArchetypeId> {
-        self.archetypes
-            .iter()
-            .position(|archetype| archetype.signature() == signature)
-            .map(|index| index as ArchetypeId)
+        // The index maps each sorted component ID set to its archetype's position.
+        self.archetype_index
+            .get(signature.component_ids())
+            .copied()
     }
 
     fn find_or_create_archetype(&mut self, signature: ArchetypeSignature) -> ArchetypeId {
@@ -220,6 +234,11 @@ impl World {
 
         let columns = self.build_columns_for_signature(&signature);
         let id = self.archetypes.len() as ArchetypeId;
+        
+        // Register the new signature before pushing so the index is always in sync.
+        self.archetype_index
+            .insert(signature.component_ids().to_vec(), id);
+
         self.archetypes.push(Archetype::new(signature, columns));
         id
     }

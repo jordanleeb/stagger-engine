@@ -16,7 +16,7 @@ pub type ArchetypeId = u32;
 ///
 /// This ensures that signatures can be compared for equality and used
 /// reliably as keys when organizing archetypes.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ArchetypeSignature {
     component_ids: Vec<ComponentId>,
 }
