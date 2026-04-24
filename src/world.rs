@@ -5,6 +5,7 @@ use crate::column::Column;
 use crate::component::{self, ComponentId, ComponentRegistry};
 use crate::entity::{Entity, EntityAllocator};
 use crate::location::EntityLocation;
+use crate::query::QueryFilter;
 
 /// Owns the core ECS state.
 ///
@@ -588,6 +589,22 @@ impl World {
         );
 
         true
+    }
+
+    /// Returns the IDs of every archetype that satisfies `filter`.
+    /// 
+    /// Archetypes are checked in ID order. The returned list preserves that order.
+    /// 
+    /// This is O(A * C) where A is the archetype count and C is the number of
+    /// filter terms, but is called at query-construction time rather than per-frame,
+    /// so the cost is amortized.
+    pub(crate) fn matching_archetypes(&self, filter: &QueryFilter) -> Vec<ArchetypeId> {
+        self.archetypes
+            .iter()
+            .enumerate()
+            .filter(|(_, arch)| filter.matches(arch.signature()))
+            .map(|(id, _)| id as ArchetypeId)
+            .collect()
     }
 }
 
