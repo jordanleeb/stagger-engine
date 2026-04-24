@@ -20,7 +20,7 @@
 - [x] QueryFilter and archetype matching
 - [x] Query, QueryIter, and RowRef with lifetime-safe world borrows
 - [x] QueryBuilder fluent API
-- [ ] Systems
+- [x] Systems
 
 ## Phase 3
 - [ ] Window and event loop
