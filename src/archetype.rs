@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::hash::Hash;
+
 use crate::column::Column;
 use crate::component::ComponentId;
 use crate::entity::Entity;
@@ -97,6 +100,18 @@ pub struct Archetype {
     /// - All columns have the same number of rows as `entities`.
     /// - Column ordering matches the sorted order of component IDs in the signature.
     columns: Vec<Column>,
+
+    /// Cached destination archetype IDs for single-component additions.
+    /// 
+    /// `add_edges[id]` is the archetype reached by adding component `id`
+    /// to this one. Populated lazily on first structural transition.
+    add_edges: HashMap<ComponentId, ArchetypeId>,
+
+    /// Cached destination archetype IDs for single-component removals.
+    /// 
+    /// `remove_edges[id]` is the archetype reached by removing component `id`
+    /// from this one. Populated lazily on first structural transition.
+    remove_edges: HashMap<ComponentId, ArchetypeId>,
 }
 
 impl Archetype {
@@ -108,6 +123,8 @@ impl Archetype {
             signature,
             entities: Vec::new(),
             columns,
+            add_edges: HashMap::new(),
+            remove_edges: HashMap::new(),
         }
     }
 
@@ -220,6 +237,26 @@ impl Archetype {
 
         self.debug_assert_row_alignment();
         removed_entity
+    }
+
+    /// Returns the cached destination archetype for adding `component_id`, if known.
+    pub fn get_add_edge(&self, component_id: ComponentId) -> Option<ArchetypeId> {
+        self.add_edges.get(&component_id).copied()
+    }
+
+    /// Records that adding `component_id` to this archetype leads to `destination`.
+    pub fn set_add_edge(&mut self, component_id: ComponentId, destination: ArchetypeId) {
+        self.add_edges.insert(component_id, destination);
+    }
+
+    /// Returns the cached destination archetype for removing `component_id`, if known.
+    pub fn get_remove_edge(&self, component_id: ComponentId) -> Option<ArchetypeId> {
+        self.remove_edges.get(&component_id).copied()
+    }
+
+    /// Records that removing `component_id` from this archetype leads to `destination`.
+    pub fn set_remove_edge(&mut self, component_id: ComponentId, destination: ArchetypeId) {
+        self.remove_edges.insert(component_id, destination);
     }
 
     /// Moves one entity row from this archetype into `destination`.

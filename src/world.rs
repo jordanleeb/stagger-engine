@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::archetype::{Archetype, ArchetypeId, ArchetypeSignature, RowMoveResult};
 use crate::column::Column;
-use crate::component::{ComponentId, ComponentRegistry};
+use crate::component::{self, ComponentId, ComponentRegistry};
 use crate::entity::{Entity, EntityAllocator};
 use crate::location::EntityLocation;
 
@@ -385,9 +385,20 @@ impl World {
             return true;
         }
 
-        // Build the destination signature with the new component included.
-        let destination_signature = self.signature_with_added(&source_signature, component_id);
-        let destination_archetype = self.find_or_create_archetype(destination_signature);
+        let cached = self.archetypes[source_id as usize].get_add_edge(component_id);
+        let destination_archetype = match cached {
+            Some(id) => id,
+            None => {
+                let destination_signature =
+                    self.signature_with_added(&source_signature, component_id);
+                let id = self.find_or_create_archetype(destination_signature);
+
+                // Cache the edge in both directions so the inverse transition is also O(1).
+                self.archetypes[source_id as usize].set_add_edge(component_id, id);
+                self.archetypes[id as usize].set_remove_edge(component_id, source_id);
+                id
+            }
+        };
 
         // Transfer the existing row structure.
         let (actual_source_archetype, old_source_row, move_result) =
@@ -518,9 +529,21 @@ impl World {
             return false;
         }
 
-        let destination_signature = self.signature_with_removed(&source_signature, component_id);
+        // Use the cached edge to skip signature computation on repeated transitions.
+        let cached = self.archetypes[source_archetype as usize].get_remove_edge(component_id);
+        let destination_archetype = match cached {
+            Some(id) => id,
+            None => {
+                let destination_signature = 
+                    self.signature_with_removed(&source_signature, component_id);
+                let id = self.find_or_create_archetype(destination_signature);
 
-        let destination_archetype = self.find_or_create_archetype(destination_signature);
+                // Cache the edge in both directions so the inverse transition is also O(1).
+                self.archetypes[source_archetype as usize].set_remove_edge(component_id, id);
+                self.archetypes[id as usize].set_add_edge(component_id, source_archetype);
+                id
+            }
+        };
 
         let (actual_source_archetype, old_source_row, move_result) =
             match self.transfer_entity_row(entity, destination_archetype) {
@@ -949,5 +972,21 @@ mod tests {
             assert!(world.add_component(e, i));
             assert!(world.remove_component::<u32>(e));
         }
+    }
+
+    #[test]
+    fn add_component_reuses_cached_edge_for_same_transition() {
+        let mut world = World::new();
+        world.register_component::<u32>();
+
+        let e1 = world.spawn();
+        let e2 = world.spawn();
+
+        world.add_component(e1, 1_u32);
+        let count_after_first = world.archetype_count();
+
+        // e2 follows the same empty -> {u32} transition; the edge should be cached.
+        world.add_component(e2, 2_u32);
+        assert_eq!(world.archetype_count(), count_after_first);
     }
 }
