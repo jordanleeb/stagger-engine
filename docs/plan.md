@@ -14,7 +14,12 @@
 - [x] Entity movement between archetypes
 - [x] Component column integration
 - [x] Add/remove component API
-- [ ] Queries
+- [x] O(1) HashMap archetype index
+- [x] Archetype edge graph for O(1) structural transitions
+- [x] Zero-sized marker component support
+- [x] QueryFilter and archetype matching
+- [x] Query, QueryIter, and RowRef with lifetime-safe world borrows
+- [x] QueryBuilder fluent API
 - [ ] Systems
 
 ## Phase 3
