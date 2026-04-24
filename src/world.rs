@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use crate::archetype::{Archetype, ArchetypeId, ArchetypeSignature, RowMoveResult};
 use crate::column::Column;
-use crate::component::{self, ComponentId, ComponentRegistry};
+use crate::component::{ComponentId, ComponentRegistry};
 use crate::entity::{Entity, EntityAllocator};
 use crate::location::EntityLocation;
-use crate::query::QueryFilter;
+use crate::query::{Query, QueryFilter};
 
 /// Owns the core ECS state.
 ///
@@ -605,6 +605,24 @@ impl World {
             .filter(|(_, arch)| filter.matches(arch.signature()))
             .map(|(id, _)| id as ArchetypeId)
             .collect()
+    }
+
+    /// Returns a compiled query over all archetypes that satisfy `filter`.
+    /// 
+    /// The returned `Query<'_>` borrows from the world and holds shared
+    /// references into archetype storage. The world cannot be mutated while
+    /// the query is alive.
+    /// 
+    /// The query captures the matching archetype set at the moment it is built.
+    /// Archetypes created after this call are not included.
+    pub fn query_with_filter(&self, filter: QueryFilter) -> Query<'_> {
+        let archetypes = self
+            .matching_archetypes(&filter)
+            .into_iter()
+            .filter_map(|id| self.archetypes.get(id as usize))
+            .collect();
+
+        Query::new(archetypes)
     }
 }
 
