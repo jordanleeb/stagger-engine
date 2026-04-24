@@ -30,6 +30,13 @@ use crate::location::EntityLocation;
 pub struct World {
     entities: EntityAllocator,
     components: ComponentRegistry,
+
+    /// Maps `entity.index` directly to that entity's archetype location.
+    /// 
+    /// Indexed by `entity.index`, so its length grows with the highest index
+    /// ever allocated rather than the current alive count. The free-list
+    /// allocator keeps indices compact (reusing slots before growing), so this
+    /// stays proportional to peak entity count rather than total ever created.
     entity_locations: Vec<Option<EntityLocation>>,
     archetypes: Vec<Archetype>,
     empty_archetype: ArchetypeId,
@@ -266,6 +273,13 @@ impl World {
         let source_id = source_location.archetype();
         let source_row = source_location.row();
 
+        // Defensive short-circuit: the source and destination are already the same
+        // archetype, so no data movement is needed.
+        //
+        // Current callers prevent this from being reached:
+        // - add_component returns early when the entity already has the component.
+        // - remove_component returns early when the entity lacks the component.
+        // This guard remains in case future callers do not uphold those preconditions.
         if source_id == destination_archetype {
             return Some((
                 source_id,

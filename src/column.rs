@@ -27,12 +27,6 @@ pub struct ComponentInfo {
 impl ComponentInfo {
     /// Creates metadata for a component type.
     pub fn new<T: 'static>(id: ComponentId) -> Self {
-        let layout = Layout::new::<T>();
-        assert!(
-            layout.size() > 0,
-            "zero-sized components are not supported yet"
-        );
-
         Self {
             id,
             type_id: TypeId::of::<T>(),
@@ -141,6 +135,13 @@ impl Column {
     }
 
     fn grow(&mut self) {
+        // Zero-sized types have no bytes to store, so no allocation is needed.
+        // Setting capacity to usize::MAX prevents push() from calling grow() again.
+        if self.info.size() == 0 {
+            self.capacity = usize::MAX;
+            return;
+        }
+
         let new_capacity = if self.capacity == 0 {
             4
         } else {
@@ -164,6 +165,13 @@ impl Column {
     }
 
     fn element_ptr(&self, index: usize) -> *mut u8 {
+        // Zero-sized types occupy no bytes, so all indices map to the same
+        // dangling-but-aligned address. Reading or writing zero bytes through
+        // a non-null aligned pointer is always valid in Rust.
+        if self.info.size() == 0 {
+            return self.ptr.as_ptr();
+        }
+
         assert!(index < self.capacity);
 
         let offset = index
@@ -448,7 +456,7 @@ impl Drop for Column {
                 (self.info.drop_fn())(ptr);
             }
 
-            if self.capacity != 0 {
+            if self.capacity != 0 && self.info.size() > 0 {
                 let layout = self.layout_for_capacity(self.capacity);
                 alloc::dealloc(self.ptr.as_ptr(), layout);
             }
@@ -613,14 +621,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "zero-sized components are not supported yet")]
-    fn zero_sized_components_are_rejected() {
-        struct Marker;
-
-        let _ = ComponentInfo::new::<Marker>(0);
-    }
-
-    #[test]
     fn move_element_to_moves_value_between_columns() {
         let mut source = Column::new(ComponentInfo::new::<u32>(0));
         let mut destination = Column::new(ComponentInfo::new::<u32>(0));
@@ -647,5 +647,45 @@ mod tests {
         source.push(10_u32);
 
         assert!(!source.move_element_to(0, &mut destination));
+    }
+
+    #[test]
+    fn zst_column_push_increments_len() {
+        struct Marker;
+
+        let info = ComponentInfo::new::<Marker>(0);
+        let mut column = Column::new(info);
+
+        column.push(Marker);
+        column.push(Marker);
+        column.push(Marker);
+
+        assert_eq!(column.len(), 3);
+    }
+
+    #[test]
+    fn zst_column_calls_drop_for_each_value() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+        struct DroppingMarker;
+
+        impl Drop for DroppingMarker {
+            fn drop(&mut self) {
+                DROP_COUNT.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        DROP_COUNT.store(0, Ordering::Relaxed);
+
+        {
+            let info = ComponentInfo::new::<DroppingMarker>(0);
+            let mut column = Column::new(info);
+            column.push(DroppingMarker);
+            column.push(DroppingMarker);
+        } // column dropped here, should invoke DroppingMarker::drop twice
+
+        assert_eq!(DROP_COUNT.load(Ordering::Relaxed), 2);
     }
 }
