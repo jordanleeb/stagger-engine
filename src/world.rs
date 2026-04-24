@@ -5,7 +5,7 @@ use crate::column::Column;
 use crate::component::{ComponentId, ComponentRegistry};
 use crate::entity::{Entity, EntityAllocator};
 use crate::location::EntityLocation;
-use crate::query::{Query, QueryFilter};
+use crate::query::{Query, QueryBuilder, QueryFilter};
 
 /// Owns the core ECS state.
 ///
@@ -624,6 +624,25 @@ impl World {
 
         Query::new(archetypes)
     }
+
+    /// Returns a `QueryBuilder` for constructing a typed query over this world.
+    /// 
+    /// # Example
+    /// 
+    /// ```
+    /// let query = world
+    ///     .query_builder()
+    ///     .require::<Position>()
+    ///     .require::<Velocity>()
+    ///     .build();
+    /// 
+    /// for row in &query {
+    ///     let pos = row.get::<Position>(pos_id).unwrap();
+    /// }
+    /// ```
+    pub fn query_builder(&self) -> QueryBuilder<'_> {
+        QueryBuilder::new(self)
+    }
 }
 
 #[cfg(test)]
@@ -1037,5 +1056,70 @@ mod tests {
         // e2 follows the same empty -> {u32} transition; the edge should be cached.
         world.add_component(e2, 2_u32);
         assert_eq!(world.archetype_count(), count_after_first);
+    }
+
+    #[test]
+    fn query_builder_integration_physics_loop() {
+        struct Pos {
+            x: f32,
+            y: f32,
+        }
+        struct Vel {
+            x: f32,
+            y: f32,
+        }
+        struct Static;
+
+        let mut world = World::new();
+        let pos_id = world.register_component::<Pos>();
+        let vel_id = world.register_component::<Vel>();
+        world.register_component::<Static>();
+
+        // Dynamic body: has position and velocity.
+        let dynamic = world.spawn();
+        world.add_component(dynamic, Pos { x: 0.0, y: 0.0 });
+        world.add_component(dynamic, Vel { x: 3.0, y: -1.0 });
+
+        // Static body: has position but no velocity; should be skipped.
+        let stationary = world.spawn();
+        world.add_component(stationary, Pos { x: 10.0, y: 10.0 });
+        world.add_component(stationary, Static);
+
+        // Simulate one tick: collect updates, then apply them.
+        //
+        // The query borrows the world immutably, so mutations must happen
+        // after the query is released. Collecting into a Vec is the
+        // standard pattern for this.
+        let updates: Vec<(Entity, f32, f32)> = {
+            let query = world
+                .query_builder()
+                .require::<Pos>()
+                .require::<Vel>()
+                .build();
+
+            query
+                .iter()
+                .map(|row| {
+                    let pos = row.get::<Pos>(pos_id).unwrap();
+                    let vel = row.get::<Vel>(vel_id).unwrap();
+
+                    (row.entity(), pos.x + vel.x, pos.y + vel.y)
+                })
+                .collect()
+        };
+        // `query` is dropped here, releasing the immutable borrow.
+
+        // Apply the computed updates back into the world using add_component,
+        // which overwrites an existing component value in place.
+        for (entity, new_x, new_y) in updates {
+            world.add_component(entity, Pos { x: new_x, y: new_y });
+        }
+
+        // Verify the dynamic entity's position was updated correctly.
+        let loc = world.location(dynamic).unwrap();
+        let arch = world.archetype(loc.archetype()).unwrap();
+        let pos = arch.column(pos_id).unwrap().get::<Pos>(loc.row()).unwrap();
+        assert_eq!(pos.x, 3.0);
+        assert_eq!(pos.y, -1.0);
     }
 }

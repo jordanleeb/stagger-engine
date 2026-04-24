@@ -2,6 +2,7 @@ use crate::archetype::ArchetypeSignature;
 use crate::component::ComponentId;
 use crate::archetype::Archetype;
 use crate::entity::Entity;
+use crate::world::World;
 
 /// Describes which archetypes a query matches.
 /// 
@@ -200,6 +201,76 @@ impl<'w> RowRef<'w> {
     }
 }
 
+/// Builds a `Query` using component types rather than raw IDs.
+/// 
+/// Obtained from `World::query_builder`. Call `require` and `exclude` to
+/// narrow the filter, then `build` to compile it into `Query`.
+/// 
+/// # Panic
+/// 
+/// `require` and `exclude` panic if the given type has not been registered
+/// with the world. Register component types with `World::register_component`
+/// before building any query that references them.
+pub struct QueryBuilder<'w> {
+    /// The world this query will run against.
+    world: &'w World,
+
+    /// The filter being assembled.
+    filter: QueryFilter,
+}
+
+impl<'w> QueryBuilder<'w> {
+    /// Creates a new builder for the given world.
+    /// 
+    /// Called internally by `World::query_builder`; user should not
+    /// construct this directly.
+    pub(crate) fn new(world: &'w World) -> Self {
+        Self {
+            world,
+            filter: QueryFilter::new(),
+        }
+    }
+
+    /// Adds `T` as a required component.
+    /// 
+    /// Return `self` so calls can be chained.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if `T` has not been registered with the world.
+    pub fn require<T: 'static>(mut self) -> Self {
+        let id = self
+            .world
+            .component_id::<T>()
+            .expect("require: component type has not been registered with this world");
+
+        self.filter = self.filter.requiring(id);
+        self
+    }
+
+    /// Add `T` as an excluded component.
+    /// 
+    /// Returns `self` so calls can be chained.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if `T` has not been registered with the world.
+    pub fn exclude<T: 'static>(mut self) -> Self {
+        let id = self
+            .world
+            .component_id::<T>()
+            .expect("exclude: component type has not been registered with this world");
+
+        self.filter = self.filter.excluding(id);
+        self
+    }
+
+    /// Compiles the filter and returns a `Query` over the world's current archetypes.
+    pub fn build(self) -> Query<'w> {
+        self.world.query_with_filter(self.filter)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,5 +427,62 @@ mod tests {
         }
 
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn builder_require_matches_same_archetypes_as_manual_filter() {
+        let mut world = World::new();
+        let pos_id = world.register_component::<Position>();
+        let vel_id = world.register_component::<Velocity>();
+
+        let e = world.spawn();
+        world.add_component(e, Position { x: 0.0, y: 0.0 });
+        world.add_component(e, Velocity { x: 1.0, y: 0.0 });
+
+        let manual_filter = QueryFilter::new().requiring(pos_id).requiring(vel_id);
+        let manual_count = world.query_with_filter(manual_filter).iter().count();
+
+        let builder_count = world
+            .query_builder()
+            .require::<Position>()
+            .require::<Velocity>()
+            .build()
+            .iter()
+            .count();
+        
+        assert_eq!(manual_count, builder_count);
+    }
+
+    #[test]
+    fn builder_exclude_omits_correct_entities() {
+        let mut world = World::new();
+        world.register_component::<Position>();
+        world.register_component::<Velocity>();
+
+        let e1 = world.spawn();
+        world.add_component(e1, Position { x: 0.0, y: 0.0 });
+
+        let e2 = world.spawn();
+        world.add_component(e2, Position { x: 0.0, y: 0.0 });
+        world.add_component(e2, Velocity { x: 1.0, y: 0.0 });
+
+        // Position but not Velocity: should match only e1.
+        let query = world
+            .query_builder()
+            .require::<Position>()
+            .exclude::<Velocity>()
+            .build();
+
+        let entities: Vec<Entity> = query.iter().map(|r| r.entity()).collect();
+        assert_eq!(entities, vec![e1]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has not been registered")]
+    fn build_panics_on_unregistered_component() {
+        let world = World::new();
+
+        // Position was never registered.
+        world.query_builder().require::<Position>().build();
     }
 }
