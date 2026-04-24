@@ -23,15 +23,15 @@
 - [ ] Systems
 
 ## Phase 3
-- [ ] Physics engine
-- [ ] Ragdoll prototype
-- [ ] Balance controller
-
-## Phase 4
-- [ ] ECS-integrated rendering architecture
 - [ ] Window and event loop
 - [ ] Renderer backend
 - [ ] Transform-driven rendering
 - [ ] Camera component and render system
-- [ ] Debug rendering
 - [ ] Mesh and material components
+- [ ] Debug rendering
+
+## Phase 4
+- [ ] Physics engine
+- [ ] Collision detection
+- [ ] Ragdoll prototype
+- [ ] Balance controller
