@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::archetype::{Archetype, ArchetypeId, ArchetypeSignature, RowMoveResult};
 use crate::column::Column;
@@ -657,6 +656,21 @@ impl World {
         let archetype = self.archetype(location.archetype())?;
         archetype.column(component_id)?.get::<T>(location.row())
     }
+
+    /// Returns a mutable reference to the component of type `T` for the given entity.
+    /// 
+    /// Returns `None` if:
+    /// - The entity is not alive.
+    /// - The component type has not been registered.
+    /// - The entity does not have a component of type `T`.
+    pub fn get_component_mut<T: 'static>(&mut self, entity: Entity) -> Option<&mut T> {
+        let component_id = self.component_id::<T>()?;
+        let location = self.location(entity)?;
+        self.archetypes
+            .get_mut(location.archetype() as usize)?
+            .column_mut(component_id)?
+            .get_mut::<T>(location.row())
+    }
 }
 
 #[cfg(test)]
@@ -1175,5 +1189,47 @@ mod tests {
         let e = Entity { index: 0, generation: 0 };
 
         assert_eq!(world.get_component::<u32>(e), None);
+    }
+
+    #[test]
+    fn get_component_mut_returns_mutable_reference() {
+        let mut world = World::new();
+        world.register_component::<u32>();
+        let e = world.spawn();
+
+        world.add_component(e, 10_u32);
+
+        *world.get_component_mut::<u32>(e).unwrap() = 99;
+
+        assert_eq!(world.get_component::<u32>(e), Some(&99));
+    }
+
+    #[test]
+    fn get_component_mut_returns_none_for_missing_component() {
+        let mut world = World::new();
+        world.register_component::<u32>();
+        let e = world.spawn();
+
+        assert_eq!(world.get_component_mut::<u32>(e), None);
+    }
+
+    #[test]
+    fn get_component_mut_returns_none_for_dead_entity() {
+        let mut world = World::new();
+        world.register_component::<u32>();
+        let e = world.spawn();
+
+        world.add_component(e, 1_u32);
+        world.destroy(e);
+
+        assert_eq!(world.get_component_mut::<u32>(e), None);
+    }
+
+    #[test]
+    fn get_component_mut_returns_none_for_unregistered_type() {
+        let mut world = World::new();
+        let e = Entity { index: 0, generation: 0 };
+
+        assert_eq!(world.get_component_mut::<u32>(e), None);
     }
 }
