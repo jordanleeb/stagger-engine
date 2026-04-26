@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::archetype::{Archetype, ArchetypeId, ArchetypeSignature, RowMoveResult};
 use crate::column::Column;
@@ -643,6 +644,19 @@ impl World {
     pub fn query_builder(&self) -> QueryBuilder<'_> {
         QueryBuilder::new(self)
     }
+
+    /// Returns a reference to the component of type `T` for the given entity.
+    /// 
+    /// Returns `None` if:
+    /// - The entity is not alive.
+    /// - The component type has not been registered.
+    /// - The entity does not have a component of type `T`.
+    pub fn get_component<T: 'static>(&self, entity: Entity) -> Option<&T> {
+        let component_id = self.component_id::<T>()?;
+        let location = self.location(entity)?;
+        let archetype = self.archetype(location.archetype())?;
+        archetype.column(component_id)?.get::<T>(location.row())
+    }
 }
 
 #[cfg(test)]
@@ -1121,5 +1135,45 @@ mod tests {
         let pos = arch.column(pos_id).unwrap().get::<Pos>(loc.row()).unwrap();
         assert_eq!(pos.x, 3.0);
         assert_eq!(pos.y, -1.0);
+    }
+
+    #[test]
+    fn get_component_returns_stored_value() {
+        let mut world = World::new();
+        let id = world.register_component::<u32>();
+        let e = world.spawn();
+
+        world.add_component(e, 42_u32);
+
+        assert_eq!(world.get_component::<u32>(e), Some(&42));
+    }
+
+    #[test]
+    fn get_component_returns_none_for_missing_component() {
+        let mut world = World::new();
+        world.register_component::<u32>();
+        let e = world.spawn();
+
+        assert_eq!(world.get_component::<u32>(e), None);
+    }
+
+    #[test]
+    fn get_component_returns_none_for_dead_entity() {
+        let mut world = World::new();
+        world.register_component::<u32>();
+        let e = world.spawn();
+
+        world.add_component(e, 1_u32);
+        world.destroy(e);
+
+        assert_eq!(world.get_component::<u32>(e), None);
+    }
+
+    #[test]
+    fn get_component_returns_none_for_unregistered_type() {
+        let world = World::new();
+        let e = Entity { index: 0, generation: 0 };
+
+        assert_eq!(world.get_component::<u32>(e), None);
     }
 }
