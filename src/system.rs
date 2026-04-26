@@ -3,7 +3,7 @@ use crate::world::World;
 /// A named, callable unit of game logic.
 /// 
 /// A `System` wraps an arbitrary `FnMut(&mut` closure and gives it a
-/// human-readable name for usse in diagnostics and debugging.
+/// human-readable name for use in diagnostics and debugging.
 /// 
 /// Each call to [`System::run`] passes exclusive access to the world to the
 /// stored closure. Because the closure is `FnMut`, a system may accumulate
@@ -101,7 +101,7 @@ pub struct Schedule {
     /// 
     /// Systems are appended in `add_system` and iterated in insertion order
     /// during `run`. Mutable access to each element is required because systems
-    /// hold `FnMut` closures that amy update their own captured state.
+    /// hold `FnMut` closures that may update their own captured state.
     systems: Vec<System>,
 }
 
@@ -128,7 +128,7 @@ impl Schedule {
     /// schedule
     ///     .add_system(physics)
     ///     .add_system(animation)
-    ///     .add_sytem(render);
+    ///     .add_system(render);
     /// ```
     pub fn add_system(&mut self, system: System) -> &mut Self {
         self.systems.push(system);
