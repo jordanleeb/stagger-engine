@@ -25,7 +25,7 @@
 ## Phase 2 QoL
 - [x] `World::get_component::<T>(entity)` convenience accessor
 - [x] `World::get_component_mut::<T>(entity)` mutable convenience accessor
-- [ ] `World::has_component::<T>(entity)` presence check
+- [x] `World::has_component::<T>(entity)` presence check
 - [ ] `remove_component` returns the removed value instead of dropping it
 
 ## Phase 3

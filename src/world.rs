@@ -671,6 +671,16 @@ impl World {
             .column_mut(component_id)?
             .get_mut::<T>(location.row())
     }
+
+    /// Returns `true` if the entity is alive and has a component of type `T`.
+    /// 
+    /// Returns `false` if:
+    /// - The entity is not alive.
+    /// - The component type has not been registered.
+    /// - The entity does not have a component of type `T`.
+    pub fn has_component<T: 'static>(&self, entity: Entity) -> bool {
+        self.get_component::<T>(entity).is_some()
+    }
 }
 
 #[cfg(test)]
@@ -1231,5 +1241,45 @@ mod tests {
         let e = Entity { index: 0, generation: 0 };
 
         assert_eq!(world.get_component_mut::<u32>(e), None);
+    }
+
+    #[test]
+    fn has_component_returns_true_when_present() {
+        let mut world = World::new();
+        world.register_component::<u32>();
+        let e = world.spawn();
+
+        world.add_component(e, 1_u32);
+
+        assert!(world.has_component::<u32>(e));
+    }
+
+    #[test]
+    fn has_component_returns_false_when_absent() {
+        let mut world = World::new();
+        world.register_component::<u32>();
+        let e = world.spawn();
+
+        assert!(!world.has_component::<u32>(e));
+    }
+
+    #[test]
+    fn has_component_returns_false_for_dead_entity() {
+        let mut world = World::new();
+        world.register_component::<u32>();
+        let e = world.spawn();
+
+        world.add_component(e, 1_u32);
+        world.destroy(e);
+
+        assert!(!world.has_component::<u32>(e));
+    }
+
+    #[test]
+    fn has_component_returns_false_for_unregistered_type() {
+        let world = World::new();
+        let e = Entity { index: 0, generation: 0 };
+
+        assert!(!world.has_component::<u32>(e));
     }
 }
