@@ -2,7 +2,7 @@ use std::alloc::{self, Layout};
 use std::any::TypeId;
 use std::ptr::NonNull;
 
-use crate::component::ComponentId;
+use crate::ecs::component::ComponentId;
 
 /// Metadata describing a registered component type.
 #[derive(Clone)]
@@ -445,6 +445,23 @@ impl Column {
 
         self.len -= 1;
         true
+    }
+
+    /// Reads and returns the value at `index` without modifying the column length.
+    /// 
+    /// After this call the slot at `index` is logically uninitialized.
+    /// The caller is responsible for ensuring the slot is compacted or
+    /// the length is adjusted before the column is used again.
+    /// 
+    /// Returns `None` if `index` is out of bounds or the type does not match.
+    pub(crate) fn read_value_at<T: 'static>(&self, index: usize) -> Option<T> {
+        self.assert_type::<T>();
+
+        if index >= self.len {
+            return None;
+        }
+
+        unsafe { Some(self.element_ptr(index).cast::<T>().read()) }
     }
 }
 

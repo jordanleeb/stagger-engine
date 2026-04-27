@@ -1,4 +1,4 @@
-use crate::world::World;
+use crate::ecs::world::World;
 
 /// A named, callable unit of game logic.
 /// 
@@ -292,7 +292,7 @@ mod tests {
         // it reads position and velocity into a Vec, drops the query,
         // then writes the updated positions back.
         let movement = System::new("movement", move |w| {
-            let updates: Vec<(crate::entity::Entity, f32, f32)> = {
+            let updates: Vec<(crate::ecs::entity::Entity, f32, f32)> = {
                 let query = w
                     .query_builder()
                     .require::<Position>()

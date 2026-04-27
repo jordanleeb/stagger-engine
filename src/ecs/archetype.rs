@@ -1,10 +1,8 @@
 use std::collections::HashMap;
-use std::hash::Hash;
-use std::path::Component;
 
-use crate::column::Column;
-use crate::component::ComponentId;
-use crate::entity::Entity;
+use crate::ecs::column::{Column, ComponentInfo};
+use crate::ecs::component::ComponentId;
+use crate::ecs::entity::Entity;
 
 /// Identifier for an archetype.
 ///
@@ -269,6 +267,14 @@ impl Archetype {
     ///
     /// This keeps source columns row-consistent during structural changes.
     ///
+    /// # Parameters
+    ///
+    /// `extracted_id` identifies a component whose value has already been read
+    /// out of the source column by the caller. That column still holds a logically
+    /// uninitialized slot at `source_row` and must still be compacted and shrunk,
+    /// but its value is not transferred to the destination. Pass `None` when no
+    /// component has been pre-extracted.
+    ///
     /// # Notes
     ///
     /// - The destination entity row is appended immediately.
@@ -283,11 +289,9 @@ impl Archetype {
         &mut self,
         source_row: usize,
         destination: &mut Archetype,
-        skip_id: Option<ComponentId>,
+        extracted_id: Option<ComponentId>,
     ) -> Option<RowMoveResult> {
-        if skip_id.is_none() {
-            self.debug_assert_row_alignment();
-        }
+        self.debug_assert_row_alignment();
 
         if source_row >= self.entities.len() {
             return None;
@@ -305,10 +309,11 @@ impl Archetype {
 
         // Phase 1: remove the source-row value from each source column.
         //
+        // - Extracted component: skip. The caller already read the value out.
         // - Shared component: move source_row into destination, leaving a hole.
         // - Removed component: drop source_row in place, leaving a hole.
         for component_id in &source_component_ids {
-            if Some(*component_id) == skip_id {
+            if Some(*component_id) == extracted_id {
                 continue;
             }
 
@@ -332,14 +337,11 @@ impl Archetype {
 
         // Phase 2: compact the source columns consistently.
         //
-        // Every source column uses the same old `last_row`, so row alignment
-        // across the archetype is preserved.
+        // All source columns are compacted here, including the extracted column.
+        // Its slot at source_row is logically uninitialized, so overwriting it
+        // with the last element is safe and required to restore alignment.
         if source_row != last_row {
             for component_id in &source_component_ids {
-                if Some(*component_id) == skip_id {
-                    continue;
-                }
-
                 let src_index = self
                     .column_index(*component_id)
                     .expect("source column missing during compaction");
@@ -351,11 +353,8 @@ impl Archetype {
             }
         }
 
+        // Phase 3: shrink all source columns by one, including the extracted column.
         for component_id in &source_component_ids {
-            if Some(*component_id) == skip_id {
-                continue;
-            }
-
             let src_index = self
                 .column_index(*component_id)
                 .expect("source column missing during shrink");
@@ -458,9 +457,6 @@ mod tests {
 
     #[test]
     fn archetype_stores_columns_for_signature() {
-        use crate::column::Column;
-        use crate::column::ComponentInfo;
-
         let signature = ArchetypeSignature::new(vec![1, 3]);
 
         let columns = vec![
@@ -476,9 +472,6 @@ mod tests {
 
     #[test]
     fn column_lookup_finds_existing_component() {
-        use crate::column::Column;
-        use crate::column::ComponentInfo;
-
         let signature = ArchetypeSignature::new(vec![1, 3]);
 
         let columns = vec![
@@ -495,8 +488,6 @@ mod tests {
 
     #[test]
     fn swap_remove_row_and_drop_components_removes_entity_and_component_rows() {
-        use crate::column::{Column, ComponentInfo};
-
         let signature = ArchetypeSignature::new(vec![1]);
         let mut archetype =
             Archetype::new(signature, vec![Column::new(ComponentInfo::new::<u32>(1))]);

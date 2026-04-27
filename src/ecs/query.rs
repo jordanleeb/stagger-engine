@@ -1,8 +1,8 @@
-use crate::archetype::ArchetypeSignature;
-use crate::component::ComponentId;
-use crate::archetype::Archetype;
-use crate::entity::Entity;
-use crate::world::World;
+use crate::ecs::archetype::ArchetypeSignature;
+use crate::ecs::component::ComponentId;
+use crate::ecs::archetype::Archetype;
+use crate::ecs::entity::Entity;
+use crate::ecs::world::World;
 
 /// Describes which archetypes a query matches.
 /// 
@@ -274,7 +274,6 @@ impl<'w> QueryBuilder<'w> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::World;
 
     struct Position {
         x: f32,

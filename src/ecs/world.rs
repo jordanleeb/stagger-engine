@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::any::{Any, TypeId};
 
-use crate::archetype::{Archetype, ArchetypeId, ArchetypeSignature, RowMoveResult};
-use crate::column::Column;
-use crate::component::{ComponentId, ComponentRegistry};
-use crate::entity::{Entity, EntityAllocator};
-use crate::location::EntityLocation;
-use crate::query::{Query, QueryBuilder, QueryFilter};
+use crate::ecs::archetype::{Archetype, ArchetypeId, ArchetypeSignature, RowMoveResult};
+use crate::ecs::column::Column;
+use crate::ecs::component::{ComponentId, ComponentRegistry};
+use crate::ecs::entity::{Entity, EntityAllocator};
+use crate::ecs::location::EntityLocation;
+use crate::ecs::query::{Query, QueryBuilder, QueryFilter};
 
 /// Owns the core ECS state.
 ///
@@ -192,7 +192,7 @@ impl World {
     /// Sets the location of an entity.
     ///
     /// Returns `false` if the entity is not alive.
-    pub fn set_location(&mut self, entity: Entity, location: EntityLocation) -> bool {
+    pub(crate) fn set_location(&mut self, entity: Entity, location: EntityLocation) -> bool {
         if !self.is_alive(entity) {
             return false;
         }
@@ -207,7 +207,7 @@ impl World {
     /// Clears the stored location of an entity.
     ///
     /// Returns `false` if the entity is not alive.
-    pub fn clear_location(&mut self, entity: Entity) -> bool {
+    pub(crate) fn clear_location(&mut self, entity: Entity) -> bool {
         if !self.is_alive(entity) {
             return false;
         }
@@ -557,8 +557,8 @@ impl World {
         let source_row = location.row();
 
         let value = self.archetypes[source_archetype as usize]
-            .column_mut(component_id)?
-            .swap_remove::<T>(source_row)?;
+            .column(component_id)?
+            .read_value_at::<T>(source_row)?;
 
         // Use the cached edge to skip signature computation on repeated transitions.
         let cached = self.archetypes[source_archetype as usize].get_remove_edge(component_id);

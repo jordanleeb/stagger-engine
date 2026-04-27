@@ -6,8 +6,8 @@ use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
 
-use crate::renderer::Renderer;
-use crate::world::World;
+use crate::render::renderer::Renderer;
+use crate::ecs::world::World;
 
 /// Owns the window and renderer, and responds to OS events.
 pub struct App {
@@ -47,14 +47,14 @@ impl ApplicationHandler for App {
         self.window = Some(window);
 
         // Register components and set up the world.
-        self.world.register_component::<crate::transform::Transform>();
+        self.world.register_component::<crate::render::transform::Transform>();
 
         // Insert the renderer as a resource so systems can access it.
         self.world.insert_resource(renderer);
 
         // Spawn a test entity with an identity transform.
         let e = self.world.spawn();
-        self.world.add_component(e, crate::transform::Transform::identity());
+        self.world.add_component(e, crate::render::transform::Transform::identity());
     }
 
     /// Called for every event that belongs to a window.
@@ -76,7 +76,7 @@ impl ApplicationHandler for App {
             }
 
             WindowEvent::RedrawRequested => {
-                crate::render_system::render_system(&mut self.world);
+                crate::render::render_system::render_system(&mut self.world);
 
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();

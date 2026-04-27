@@ -1,4 +1,4 @@
-use crate::archetype::ArchetypeId;
+use crate::ecs::archetype::ArchetypeId;
 
 /// Identifies where an entity is stored in the ECS.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]

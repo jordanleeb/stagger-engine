@@ -1,6 +1,7 @@
-use crate::column::ComponentInfo;
 use std::any::TypeId;
 use std::collections::HashMap;
+
+use crate::ecs::column::ComponentInfo;
 
 /// Runtime identifier for a registered component type.
 pub type ComponentId = u32;
