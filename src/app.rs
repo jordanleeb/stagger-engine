@@ -5,7 +5,9 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
+
 use crate::renderer::Renderer;
+use crate::world::World;
 
 /// Owns the window and renderer, and responds to OS events.
 pub struct App {
@@ -16,11 +18,11 @@ pub struct App {
     /// needed to share ownership of the window.
     window: Option<Arc<Window>>,
 
-    /// The wgpu renderer attached to the window.
+    /// the ECS world holding all entities, components, and resources.
     /// 
-    /// Stored in an Option for the same reason as window: it cannot
-    /// be created until the window exists.
-    renderer: Option<Renderer>,
+    /// The renderer is stored inside the world as a resource so that
+    /// systems can access it without borrowing the app directly.
+    world: World,
 }
 
 impl App {
@@ -28,7 +30,7 @@ impl App {
     pub fn new() -> Self {
         Self {
             window: None,
-            renderer: None,
+            world: World::new(),
         }
     }
 }
@@ -39,13 +41,20 @@ impl ApplicationHandler for App {
     /// On Linux desktop this is called once at startup.
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let attributes = Window::default_attributes().with_title("Stagger");
-
         let window = Arc::new(event_loop.create_window(attributes).unwrap());
-
         let renderer = pollster::block_on(Renderer::new(Arc::clone(&window)));
 
         self.window = Some(window);
-        self.renderer = Some(renderer);
+
+        // Register components and set up the world.
+        self.world.register_component::<crate::transform::Transform>();
+
+        // Insert the renderer as a resource so systems can access it.
+        self.world.insert_resource(renderer);
+
+        // Spawn a test entity with an identity transform.
+        let e = self.world.spawn();
+        self.world.add_component(e, crate::transform::Transform::identity());
     }
 
     /// Called for every event that belongs to a window.
@@ -61,17 +70,14 @@ impl ApplicationHandler for App {
             }
 
             WindowEvent::Resized(new_size) => {
-                if let Some(renderer) = self.renderer.as_mut() {
+                if let Some(renderer) = self.world.get_resource_mut::<Renderer>() {
                     renderer.resize(new_size);
                 }
             }
 
             WindowEvent::RedrawRequested => {
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.render();
-                }
+                crate::render_system::render_system(&mut self.world);
 
-                // Request another frame immediately to keep the loop running.
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }

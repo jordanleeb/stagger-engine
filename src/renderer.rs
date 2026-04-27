@@ -88,6 +88,15 @@ pub struct Renderer {
 
     /// The number of vertices in the vertex buffer.
     vertex_count: u32,
+
+    /// The uniform buffer holding the model matrix for the current draw call.
+    uniform_buffer: wgpu::Buffer,
+
+    /// The bind group layout describing what the shader expects at group 0.
+    bind_group_layout: wgpu::BindGroupLayout,
+
+    /// The bind group connecting the uniform buffer to the shader.
+    bind_group: wgpu::BindGroup,
 }
 
 const VERTICES: &[Vertex] = &[
@@ -153,6 +162,44 @@ impl Renderer {
 
         surface.configure(&device, &config);
 
+        // The uniform buffer holds one model matrix (16 floats = 64 bytes).
+        // UNIFORM usage tells wgpu this buffer will be used as a uniform.
+        // COPY_DST allows the CPU to write into it each frame.
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("uniform buffer"),
+            size: 64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // The bind group layout describes the shape of group(0) in the shader:
+        // one uniform buffer at binding 0, visible to the vertex shader.
+        let bind_group_layout = device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                label: Some("bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            }
+        );
+
+        // The bind group connects the actual buffer to the layout slot.
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bind group"),
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+
         // Load the shader source at compile time.
         // include_str! embeds the file contents as a &str in the binary.
         let shader_source = include_str!("shader.wgsl");
@@ -166,7 +213,7 @@ impl Renderer {
         let pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("pipeline layout"),
-                bind_group_layouts: &[],
+                bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             }
         );
@@ -232,6 +279,9 @@ impl Renderer {
             pipeline,
             vertex_buffer,
             vertex_count,
+            uniform_buffer,
+            bind_group_layout,
+            bind_group,
         }
     }
 
@@ -255,7 +305,15 @@ impl Renderer {
     /// Clears the screen to a solid color to confirm the pipeline
     /// is working. Returns early if the surface is lost, which can
     /// happen when the window is minimized or resized mid-frame.
-    pub fn render(&mut self) -> bool {
+    pub fn render(&mut self, model_matrix: [[f32; 4]; 4]) -> bool {
+        // Write the model matrix into the uniform buffer.
+        // cast_slice reinterprets the matrix as raw bytes for the GPU.
+        self.queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            bytemuck::cast_slice(&model_matrix),
+        );
+
         // Get the next texture to render into.
         let output = match self.surface.get_current_texture() {
             Ok(texture) => texture,
@@ -298,6 +356,7 @@ impl Renderer {
             });
 
             pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             pass.draw(0..self.vertex_count, 0..1);
         }

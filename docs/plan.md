@@ -27,6 +27,7 @@
 - [x] `World::get_component_mut::<T>(entity)` mutable convenience accessor
 - [x] `World::has_component::<T>(entity)` presence check
 - [x] `remove_component` returns the removed value instead of dropping it
+- [x] Resources (insert_resource, get_resources, get_resource_mut)
 
 ## Phase 3
 - [x] Window and event loop

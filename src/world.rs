@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::any::{Any, TypeId};
 
 use crate::archetype::{Archetype, ArchetypeId, ArchetypeSignature, RowMoveResult};
 use crate::column::Column;
@@ -47,6 +48,13 @@ pub struct World {
     /// This allows `find_archetype_by_signature` to run in O(1) rather than
     /// scanning every archetype on every structural change.
     archetype_index: HashMap<Vec<ComponentId>, ArchetypeId>,
+
+    /// Stores singleton resources keyed by their type.
+    /// 
+    /// Each type may have at most one resource instance.
+    /// Resources are accessible to systems via get_resource and
+    /// get_resource_mut without being tied to any entity.
+    resources: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl Default for World {
@@ -71,6 +79,7 @@ impl World {
             archetypes: vec![empty_archetype],
             empty_archetype: 0,
             archetype_index,
+            resources: HashMap::new(),
         }
     }
 
@@ -688,6 +697,29 @@ impl World {
     pub fn has_component<T: 'static>(&self, entity: Entity) -> bool {
         self.get_component::<T>(entity).is_some()
     }
+
+    /// Inserts a resource of type `T` into the world.
+    /// 
+    /// If a resource of this type already exists, it is replaced.
+    pub fn insert_resource<T: 'static>(&mut self, value: T) {
+        self.resources.insert(TypeId::of::<T>(), Box::new(value));
+    }
+
+    /// Returns `None` if no resource of this type has been inserted.
+    pub fn get_resource<T: 'static>(&self) -> Option<&T> {
+        self.resources
+            .get(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast_ref::<T>())
+    }
+
+    /// Returns a mutable reference to the resource of type `T`.
+    /// 
+    /// Return `None` if no resources of this type has been inserted.
+    pub fn get_resource_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.resources
+            .get_mut(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast_mut::<T>())
+    }
 }
 
 #[cfg(test)]
@@ -1298,5 +1330,34 @@ mod tests {
         let e = world.spawn();
 
         assert_eq!(world.remove_component::<u32>(e), None);
+    }
+
+    #[test]
+    fn insert_and_get_resource() {
+        let mut world = World::new();
+        world.insert_resource(42_u32);
+        assert_eq!(world.get_resource::<u32>(), Some(&42));
+    }
+
+    #[test]
+    fn get_resource_returns_none_when_absent() {
+        let world = World::new();
+        assert_eq!(world.get_resource::<u32>(), None);
+    }
+
+    #[test]
+    fn insert_resource_replaces_existing() {
+        let mut world = World::new();
+        world.insert_resource(1_u32);
+        world.insert_resource(2_u32);
+        assert_eq!(world.get_resource::<u32>(), Some(&2));
+    }
+
+    #[test]
+    fn get_resource_mut_allows_modification() {
+        let mut world = World::new();
+        world.insert_resource(10_u32);
+        *world.get_resource_mut::<u32>().unwrap() = 99;
+        assert_eq!(world.get_resource::<u32>(), Some(&99));
     }
 }
