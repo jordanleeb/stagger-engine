@@ -930,15 +930,11 @@ mod tests {
         let mut world = World::new();
 
         let e = world.spawn();
-        let id = world.register_component::<u32>();
+        world.register_component::<u32>();
 
         assert!(world.add_component(e, 123_u32));
 
-        let loc = world.location(e).unwrap();
-        let arch = world.archetype(loc.archetype()).unwrap();
-
-        let col = arch.column(id).unwrap();
-        assert_eq!(col.get::<u32>(loc.row()), Some(&123));
+        assert_eq!(world.get_component::<u32>(e), Some(&123));
     }
 
     #[test]
@@ -946,16 +942,12 @@ mod tests {
         let mut world = World::new();
 
         let e = world.spawn();
-        let id = world.register_component::<u32>();
+        world.register_component::<u32>();
 
         assert!(world.add_component(e, 10_u32));
         assert!(world.add_component(e, 20_u32));
 
-        let loc = world.location(e).unwrap();
-        let arch = world.archetype(loc.archetype()).unwrap();
-
-        let col = arch.column(id).unwrap();
-        assert_eq!(col.get::<u32>(loc.row()), Some(&20));
+        assert_eq!(world.get_component::<u32>(e), Some(&20));
     }
 
     #[test]
@@ -1161,9 +1153,7 @@ mod tests {
         }
 
         // Verify the dynamic entity's position was updated correctly.
-        let loc = world.location(dynamic).unwrap();
-        let arch = world.archetype(loc.archetype()).unwrap();
-        let pos = arch.column(pos_id).unwrap().get::<Pos>(loc.row()).unwrap();
+        let pos = world.get_component::<Pos>(dynamic).unwrap();
         assert_eq!(pos.x, 3.0);
         assert_eq!(pos.y, -1.0);
     }

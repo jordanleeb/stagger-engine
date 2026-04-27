@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn system_run_executes_the_closure() {
         let mut world = World::new();
-        let id = world.register_component::<u32>();
+        world.register_component::<u32>();
         let e = world.spawn();
 
         // The system writes a known value to the entity's component slot.
@@ -180,9 +180,7 @@ mod tests {
         system.run(&mut world);
 
         // Verify the closure actually ran by reading back the written value.
-        let loc = world.location(e).unwrap();
-        let arch = world.archetype(loc.archetype()).unwrap();
-        assert_eq!(arch.column(id).unwrap().get::<u32>(loc.row()), Some(&42));
+        assert_eq!(world.get_component::<u32>(e), Some(&42));
     }
 
     #[test]
@@ -265,14 +263,8 @@ mod tests {
                 w.add_component(e, 10_u32);
             }))
             .add_system(System::new("doubler", move |w| {
-                // Read what A write, double it, and write it back.
-                let current = {
-                    let query = w.query_builder().build();
-                    let loc = w.location(e).unwrap();
-                    let arch = w.archetype(loc.archetype()).unwrap();
-                    arch.column(id).and_then(|col| col.get::<u32>(loc.row())).copied()
-                };
-
+                let current = w.get_component::<u32>(e).copied();
+                
                 if let Some(v) = current {
                     w.add_component(e, v * 2);
                 }
@@ -280,9 +272,7 @@ mod tests {
         
         schedule.run(&mut world);
 
-        let loc = world.location(e).unwrap();
-        let arch = world.archetype(loc.archetype()).unwrap();
-        assert_eq!(arch.column(id).unwrap().get::<u32>(loc.row()), Some(&20));
+        assert_eq!(world.get_component::<u32>(e), Some(&20));
     }
 
     #[test]
@@ -329,9 +319,7 @@ mod tests {
         schedule.add_system(movement);
         schedule.run(&mut world);
 
-        let loc = world.location(e).unwrap();
-        let arch = world.archetype(loc.archetype()).unwrap();
-        let pos = arch.column(pos_id).unwrap().get::<Position>(loc.row()).unwrap();
+        let pos = world.get_component::<Position>(e).unwrap();
 
         assert_eq!(pos.x, 3.0);
         assert_eq!(pos.y, -1.0);
