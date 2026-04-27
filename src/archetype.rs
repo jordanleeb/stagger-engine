@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::path::Component;
 
 use crate::column::Column;
 use crate::component::ComponentId;
@@ -282,8 +283,11 @@ impl Archetype {
         &mut self,
         source_row: usize,
         destination: &mut Archetype,
+        skip_id: Option<ComponentId>,
     ) -> Option<RowMoveResult> {
-        self.debug_assert_row_alignment();
+        if skip_id.is_none() {
+            self.debug_assert_row_alignment();
+        }
 
         if source_row >= self.entities.len() {
             return None;
@@ -304,6 +308,10 @@ impl Archetype {
         // - Shared component: move source_row into destination, leaving a hole.
         // - Removed component: drop source_row in place, leaving a hole.
         for component_id in &source_component_ids {
+            if Some(*component_id) == skip_id {
+                continue;
+            }
+
             let src_index = self
                 .column_index(*component_id)
                 .expect("source column missing for source signature component");
@@ -328,6 +336,10 @@ impl Archetype {
         // across the archetype is preserved.
         if source_row != last_row {
             for component_id in &source_component_ids {
+                if Some(*component_id) == skip_id {
+                    continue;
+                }
+
                 let src_index = self
                     .column_index(*component_id)
                     .expect("source column missing during compaction");
@@ -340,6 +352,10 @@ impl Archetype {
         }
 
         for component_id in &source_component_ids {
+            if Some(*component_id) == skip_id {
+                continue;
+            }
+
             let src_index = self
                 .column_index(*component_id)
                 .expect("source column missing during shrink");

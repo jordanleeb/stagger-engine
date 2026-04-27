@@ -265,6 +265,7 @@ impl World {
         &mut self,
         entity: Entity,
         destination_archetype: ArchetypeId,
+        skip_id: Option<ComponentId>,
     ) -> Option<(ArchetypeId, usize, RowMoveResult)> {
         if !self.is_alive(entity) {
             return None;
@@ -300,13 +301,13 @@ impl World {
             let source = &mut left[source_index];
             let destination = &mut right[0];
 
-            source.move_row_to(source_row, destination)
+            source.move_row_to(source_row, destination, skip_id)
         } else {
             let (left, right) = self.archetypes.split_at_mut(source_index);
             let destination = &mut left[destination_index];
             let source = &mut right[0];
 
-            source.move_row_to(source_row, destination)
+            source.move_row_to(source_row, destination, skip_id)
         }?;
 
         Some((source_id, source_row, result))
@@ -417,7 +418,7 @@ impl World {
 
         // Transfer the existing row structure.
         let (actual_source_archetype, old_source_row, move_result) =
-            match self.transfer_entity_row(entity, destination_archetype) {
+            match self.transfer_entity_row(entity, destination_archetype, None) {
                 Some(result) => result,
                 None => return false,
             };
@@ -495,7 +496,7 @@ impl World {
         ArchetypeSignature::new(ids)
     }
 
-    /// Removes a component of type `T` from an entity.
+    /// Removes a component of type `T` from an entity and returns it.
     ///
     /// This moves the entity into a new archetype that no longer contains `T`.
     ///
@@ -508,7 +509,7 @@ impl World {
     /// - Drops the removed component during source-row removal.
     /// - Updates all affected entity locations.
     ///
-    /// Returns `false` if:
+    /// Returns `None` if:
     /// - The entity is not alive.
     /// - The component type is not registered.
     /// - The entity does not have this component.
@@ -519,19 +520,19 @@ impl World {
     /// - The entity exists in exactly one archetype.
     /// - The removed component is dropped.
     /// - All remaining component columns remain aligned.
-    pub fn remove_component<T: 'static>(&mut self, entity: Entity) -> bool {
+    pub fn remove_component<T: 'static>(&mut self, entity: Entity) -> Option<T> {
         if !self.is_alive(entity) {
-            return false;
+            return None;
         }
 
         let component_id = match self.component_id::<T>() {
             Some(id) => id,
-            None => return false,
+            None => return None,
         };
 
         let location = match self.location(entity) {
             Some(location) => location,
-            None => return false,
+            None => return None,
         };
 
         let source_archetype = location.archetype();
@@ -541,8 +542,14 @@ impl World {
             .clone();
 
         if !source_signature.contains(component_id) {
-            return false;
+            return None;
         }
+
+        let source_row = location.row();
+
+        let value = self.archetypes[source_archetype as usize]
+            .column_mut(component_id)?
+            .swap_remove::<T>(source_row)?;
 
         // Use the cached edge to skip signature computation on repeated transitions.
         let cached = self.archetypes[source_archetype as usize].get_remove_edge(component_id);
@@ -561,9 +568,9 @@ impl World {
         };
 
         let (actual_source_archetype, old_source_row, move_result) =
-            match self.transfer_entity_row(entity, destination_archetype) {
+            match self.transfer_entity_row(entity, destination_archetype, Some(component_id)) {
                 Some(result) => result,
-                None => return false,
+                None => return None,
             };
 
         // Fix the location of any entity that got swap-moved inside the source archetype.
@@ -588,7 +595,7 @@ impl World {
             "destination archetype not aligned after remove_component"
         );
 
-        true
+        Some(value)
     }
 
     /// Returns the IDs of every archetype that satisfies `filter`.
@@ -983,7 +990,7 @@ mod tests {
         assert!(world.add_component(e, 10_u32));
         assert!(world.add_component(e, 1.5_f32));
 
-        assert!(world.remove_component::<u32>(e));
+        assert_eq!(world.remove_component::<u32>(e), Some(10_u32));
 
         let loc = world.location(e).unwrap();
         let arch = world.archetype(loc.archetype()).unwrap();
@@ -996,13 +1003,13 @@ mod tests {
     }
 
     #[test]
-    fn remove_component_returns_false_if_absent() {
+    fn remove_component_returns_none_if_absent() {
         let mut world = World::new();
 
         let e = world.spawn();
         world.register_component::<u32>();
 
-        assert!(!world.remove_component::<u32>(e));
+        assert!(world.remove_component::<u32>(e).is_none());
     }
 
     #[test]
@@ -1013,7 +1020,7 @@ mod tests {
         world.register_component::<u32>();
 
         assert!(world.add_component(e, 99_u32));
-        assert!(world.remove_component::<u32>(e));
+        assert!(world.remove_component::<u32>(e).is_some());
 
         let loc = world.location(e).unwrap();
         assert_eq!(loc.archetype(), world.empty_archetype_id());
@@ -1035,7 +1042,7 @@ mod tests {
 
         let source_archetype = world.location(e2).unwrap().archetype();
 
-        assert!(world.remove_component::<u32>(e2));
+        assert!(world.remove_component::<u32>(e2).is_some());
 
         let e3_location = world.location(e3).unwrap();
         if e3_location.archetype() == source_archetype {
@@ -1076,7 +1083,7 @@ mod tests {
 
         for i in 0_u32..100 {
             assert!(world.add_component(e, i));
-            assert!(world.remove_component::<u32>(e));
+            assert!(world.remove_component::<u32>(e).is_some());
         }
     }
 
@@ -1281,5 +1288,25 @@ mod tests {
         let e = Entity { index: 0, generation: 0 };
 
         assert!(!world.has_component::<u32>(e));
+    }
+
+    #[test]
+    fn remove_component_returns_the_value() {
+        let mut world = World::new();
+        world.register_component::<u32>();
+        let e = world.spawn();
+
+        world.add_component(e, 42_u32);
+
+        assert_eq!(world.remove_component::<u32>(e), Some(42));
+    }
+
+    #[test]
+    fn remove_component_returns_none_when_absent() {
+        let mut world = World::new();
+        world.register_component::<u32>();
+        let e = world.spawn();
+
+        assert_eq!(world.remove_component::<u32>(e), None);
     }
 }
