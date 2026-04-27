@@ -32,7 +32,7 @@
 ## Phase 3
 - [x] Window and event loop
 - [x] Renderer backend
-- [ ] Transform-driven rendering
+- [x] Transform-driven rendering
 - [ ] Camera component and render system
 - [ ] Mesh and material components
 - [ ] Debug rendering
