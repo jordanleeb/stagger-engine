@@ -6,7 +6,11 @@ mod location;
 mod query;
 mod system;
 mod world;
+mod app;
+mod renderer;
 
 fn main() {
-    println!("Hello, world!");
+    let event_loop = winit::event_loop::EventLoop::new().unwrap();
+    let mut app = app::App::new();
+    event_loop.run_app(&mut app).unwrap();
 }

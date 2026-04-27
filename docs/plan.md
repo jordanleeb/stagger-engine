@@ -29,7 +29,7 @@
 - [x] `remove_component` returns the removed value instead of dropping it
 
 ## Phase 3
-- [ ] Window and event loop
+- [x] Window and event loop
 - [ ] Renderer backend
 - [ ] Transform-driven rendering
 - [ ] Camera component and render system
