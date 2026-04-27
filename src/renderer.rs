@@ -1,6 +1,59 @@
 use std::sync::Arc;
 use winit::window::Window;
 
+/// One vertex in a mesh.
+/// 
+/// The layout of this struct must match the vertex buffer layout
+/// passedd to the pipeline and the @location attributes in the shader.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Vertex {
+    /// Position in clip space.
+    pub position: [f32; 3],
+
+    /// RGB color for this vertex.
+    pub color: [f32; 3],
+}
+
+impl Vertex {
+    /// Returns the wgpu vertex buffer layout for this type.
+    /// 
+    /// This tells the pipeline how to interpret the raw bytes in the
+    /// vertex buffer: where each attribute starts and what type it is.
+    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            // The number of bytes between the start of one vertex and
+            // the start of the next.
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+
+            // step_mode::Vertex means one set of attributes per vertex.
+            // The alternative is VertexBufferLayout::Instance for
+            // per-instance data.
+            step_mode: wgpu::VertexStepMode::Vertex,
+
+            // Each attribute maps to one @location in the shader.
+            attributes: &[
+                wgpu::VertexAttribute {
+                    // @location(0) in the shader: position.
+                    shader_location: 0,
+                    // Starts at byte 0 of the vertex.
+                    offset: 0,
+                    // Three f32 values.
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    // @location(1) in the shader: color.
+                    shader_location: 1,
+                    // Starts after the position field (3 * 4 = 12 bytes in).
+                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    // Three f32 values.
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+            ],
+        }
+    }
+}
+
 /// Owns all wgpu state for a single window surface.
 /// 
 /// Created once during application startup and used each frame
@@ -26,7 +79,22 @@ pub struct Renderer {
 
     /// The surface configuration, including size and format.
     config: wgpu::SurfaceConfiguration,
+
+    /// The renderer pipeline describing the shaders and draw settings.
+    pipeline: wgpu::RenderPipeline,
+
+    /// The GPU buffer holding the triangle's vertex data.
+    vertex_buffer: wgpu::Buffer,
+
+    /// The number of vertices in the vertex buffer.
+    vertex_count: u32,
 }
+
+const VERTICES: &[Vertex] = &[
+    Vertex { position: [0.0,  0.5, 0.0], color: [1.0, 0.0, 0.0] },
+    Vertex { position: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
+    Vertex { position: [0.5, -0.5, 0.0], color: [0.0, 0.0, 1.0] },
+];
 
 impl Renderer {
     /// Creates a new renderer attached to the given window.
@@ -85,6 +153,75 @@ impl Renderer {
 
         surface.configure(&device, &config);
 
+        // Load the shader source at compile time.
+        // include_str! embeds the file contents as a &str in the binary.
+        let shader_source = include_str!("shader.wgsl");
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shader"),
+            source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+        });
+
+        // An empty pipeline layout means the shaders use no external
+        // resources such as textures or uniform buffers.
+        let pipeline_layout = device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("pipeline layout"),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            }
+        );
+
+        
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("render pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: &"vs_main",
+                buffers: &[Vertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: &"fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
+        // Upload the vertex data into a GPU buffer.
+        // VERTEX usage tells wgpu this buffer will be used as a vertex buffer.
+        // COPY_DST allows data to be written into it from the CPU.
+        use wgpu::util::DeviceExt;
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vertex buffer"),
+            contents: bytemuck::cast_slice(VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let vertex_count = VERTICES.len() as u32;
+
         Self {
             instance,
             surface,
@@ -92,6 +229,9 @@ impl Renderer {
             device,
             queue,
             config,
+            pipeline,
+            vertex_buffer,
+            vertex_count,
         }
     }
 
@@ -137,7 +277,7 @@ impl Renderer {
         // A render pass describes what to draw and where to draw it.
         // This one just clears the screen to a dark grey.
         {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("clear pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
@@ -156,6 +296,10 @@ impl Renderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+
+            pass.set_pipeline(&self.pipeline);
+            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            pass.draw(0..self.vertex_count, 0..1);
         }
 
         // Submit the recorded commands to the GPU and present the frame.
