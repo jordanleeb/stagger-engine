@@ -27,7 +27,7 @@
 - [x] `World::get_component_mut::<T>(entity)` mutable convenience accessor
 - [x] `World::has_component::<T>(entity)` presence check
 - [x] `remove_component` returns the removed value instead of dropping it
-- [x] Resources (insert_resource, get_resources, get_resource_mut)
+- [x] Resources (insert_resource, get_resource, get_resource_mut)
 
 ## Phase 3
 - [x] Window and event loop
@@ -41,6 +41,18 @@
   - [x] Contact point and normal visualizers
   - [x] Raycast visualizers
   - [x] Debug draw API accessible from physics systems
+
+## Phase 3 QoL
+- [ ] Free camera controller
+  - [ ] WASD movement
+  - [ ] Vertical movement
+  - [ ] Mouse look
+  - [ ] Keyboard look fallback
+  - [ ] Reset to demo camera
+- [ ] Cursor capture and release
+- [ ] Toggleable demo debug drawing
+- [ ] Runtime camera speed and sensitivity settings
+- [ ] Basic controls/help overlay
 
 ## Phase 4
 - [ ] Physics engine
