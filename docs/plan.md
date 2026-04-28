@@ -37,10 +37,9 @@
 - [x] Mesh and material components
 - [x] Debug rendering
   - [x] Line renderer for vectors and edges
-  - [x] Wireframe collision shapes (boxes, spheres, capsules)
+  - [x] Collision shapes (boxes, spheres, capsules)
   - [x] Contact point and normal visualizers
   - [x] Raycast visualizers
-  - [x] Bounding volume visualizers
   - [x] Debug draw API accessible from physics systems
 
 ## Phase 4
