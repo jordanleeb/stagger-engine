@@ -4,3 +4,4 @@ pub mod transform;
 pub mod camera;
 pub mod mesh;
 pub mod material;
+pub mod debug;

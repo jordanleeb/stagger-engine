@@ -11,6 +11,7 @@ use crate::render::mesh::{Mesh, Vertex};
 use crate::render::renderer::Renderer;
 use crate::render::transform::Transform;
 use crate::ecs::world::World;
+use crate::render::debug::DebugDraw;
 
 /// Owns the window and renderer, and responds to OS events.
 pub struct App {
@@ -63,6 +64,7 @@ impl ApplicationHandler for App {
         ]);
 
         self.world.insert_resource(renderer);
+        self.world.insert_resource(DebugDraw::new());
 
         // Spawn the camera entity.
         let camera = self.world.spawn();
@@ -101,6 +103,26 @@ impl ApplicationHandler for App {
             }
 
             WindowEvent::RedrawRequested => {
+                // Test debug drawing.
+                if let Some(debug) = self.world.get_resource_mut::<DebugDraw>() {
+                    debug.draw_line(
+                        [-1.0, 0.0, 0.0],
+                        [1.0, 0.0, 0.0],
+                        [1.0, 1.0, 0.0],
+                        Some(crate::render::debug::EndMarker::Cone { length: 0.1, radius: 0.05 }),
+                    );
+                    debug.draw_box(
+                        [0.0, 0.5, 0.0],
+                        [0.2, 0.2, 0.2],
+                        [0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.3],
+                    );
+                    debug.draw_sphere([-0.5, 0.0, 0.0], 0.2, [0.0, 0.5, 1.0, 0.3]);
+                    debug.draw_capsule([0.5, -0.3, 0.0], [0.5, 0.3, 0.0], 0.1, [1.0, 0.0, 0.5, 0.3]);
+                    debug.draw_contact([0.0, -0.3, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]);
+                    debug.draw_raycast([-1.0, -0.5, 0.0], [0.3, -0.5, 0.0], [1.0, 0.5, 0.0], true);
+                }
+
                 crate::render::render_system::render_system(&mut self.world);
 
                 if let Some(window) = self.window.as_ref() {

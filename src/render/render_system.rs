@@ -1,4 +1,5 @@
 use crate::render::camera::{ActiveCamera, Camera};
+use crate::render::debug::DebugDraw;
 use crate::render::material::Material;
 use crate::render::mesh::Mesh;
 use crate::render::renderer::{DrawCall, Renderer};
@@ -8,8 +9,8 @@ use crate::ecs::world::World;
 /// Draws one mesh per entity that has a Transform, Mesh, and Material component.
 ///
 /// Reads the active camera resource to build the VP matrix once per frame,
-/// then collects one DrawCall per renderable entity and submits them all
-/// to the renderer in a single render_frame call.
+/// collects one DrawCall per renderable entity, takes any pending debug tasks,
+/// then submits everything to the renderer in a single render_frame call.
 pub fn render_system(world: &mut World) {
     let aspect = match world.get_resource::<Renderer>() {
         Some(r) => r.aspect_ratio(),
@@ -46,7 +47,7 @@ pub fn render_system(world: &mut World) {
     // The query borrows the world immutably, so the renderer must be
     // accessed after the query is dropped.
     let transform_id = world.component_id::<Transform>().unwrap();
-    let mesh_id_component = world.component_id::<Mesh>().unwrap();
+    let mesh_component_id = world.component_id::<Mesh>().unwrap();
     let material_id = world.component_id::<Material>().unwrap();
 
     let draw_calls: Vec<DrawCall> = {
@@ -65,7 +66,7 @@ pub fn render_system(world: &mut World) {
                     .unwrap()
                     .to_model_matrix();
 
-                let mesh_id = row.get::<Mesh>(mesh_id_component)
+                let mesh_id = row.get::<Mesh>(mesh_component_id)
                     .unwrap()
                     .id;
 
@@ -78,8 +79,13 @@ pub fn render_system(world: &mut World) {
             .collect()
     };
 
+    // Take all pending debug tasks, leaving the buffer empty for the next frame.
+    let debug_tasks = world.get_resource_mut::<DebugDraw>()
+        .map(|d| d.take())
+        .unwrap_or_default();
+
     let renderer = world.get_resource_mut::<Renderer>().unwrap();
-    renderer.render_frame(vp_matrix, &draw_calls);
+    renderer.render_frame(vp_matrix, &draw_calls, &debug_tasks);
 }
 
 /// Multiplies two column-major 4x4 matrices, returning a * b.
