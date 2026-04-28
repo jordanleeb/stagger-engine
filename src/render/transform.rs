@@ -67,4 +67,42 @@ impl Transform {
             ],
         ]
     }
+
+    /// Converts this transform into a column-major 4x4 view matrix.
+    /// 
+    /// The view matrix is the inverse of the model matrix. For a transform
+    /// built from rotation and translation with unit scale, the inverse
+    /// has a closed form: the upper-left 3x3 is the transpose of the
+    /// rotation matrix, and the translation column is -R^T * position.
+    /// 
+    /// The assumes scale is [1, 1, 1]. Non-unit sclae breaks the
+    /// orthogonality of the rotation matrix and invalidates this formula.
+    pub fn to_view_matrix(&self) -> [[f32; 4]; 4] {
+        let (sx, cx) = (self.rotation[0].sin(), self.rotation[0].cos());
+        let (sy, cy) = (self.rotation[1].sin(), self.rotation[1].cos());
+        let (sz, cz) = (self.rotation[2].sin(), self.rotation[2].cos());
+
+        // The camera's basis vectors in world space.
+        // These are the columns of the rotation matrix, which become
+        // the rows of R^T when we transpose.
+        let right   = [cy * cz, sx * sy * cz + cx * sz, -cx * sy * cz + sx * sz];
+        let up      = [-cy * sz, -sx * sy * sz + cx * cz, cx * sy * sz + sx * cz];
+        let forward = [sy, -sx * cy, cx * cy];
+
+        let p = self.position;
+
+        // Translation entries are -dot(basis, position) for each axis.
+        let tx = -(right[0] * p[0] + right[1] * p[1] + right[2] * p[2]);
+        let ty = -(up[0] * p[0] + up[1] * p[1] + up[2] * p[2]);
+        let tz = -(forward[0] * p[0] + forward[1] * p[1] + forward[2] * p[2]);
+
+        // R^T in the upper-left 3x3, -R^T*p in the last column.
+        // Each inner array is a column.
+        [
+            [right[0],   up[0],   forward[0], 0.0],
+            [right[1],   up[1],   forward[1], 0.0],
+            [right[2],   up[2],   forward[2], 0.0],
+            [tx,         ty,      tz,         1.0],
+        ]
+    }
 }

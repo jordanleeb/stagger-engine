@@ -2,9 +2,9 @@ use std::sync::Arc;
 use winit::window::Window;
 
 /// One vertex in a mesh.
-/// 
+///
 /// The layout of this struct must match the vertex buffer layout
-/// passedd to the pipeline and the @location attributes in the shader.
+/// passed to the pipeline and the @location attributes in the shader.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
@@ -17,36 +17,22 @@ pub struct Vertex {
 
 impl Vertex {
     /// Returns the wgpu vertex buffer layout for this type.
-    /// 
+    ///
     /// This tells the pipeline how to interpret the raw bytes in the
     /// vertex buffer: where each attribute starts and what type it is.
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
-            // The number of bytes between the start of one vertex and
-            // the start of the next.
             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-
-            // step_mode::Vertex means one set of attributes per vertex.
-            // The alternative is VertexBufferLayout::Instance for
-            // per-instance data.
             step_mode: wgpu::VertexStepMode::Vertex,
-
-            // Each attribute maps to one @location in the shader.
             attributes: &[
                 wgpu::VertexAttribute {
-                    // @location(0) in the shader: position.
                     shader_location: 0,
-                    // Starts at byte 0 of the vertex.
                     offset: 0,
-                    // Three f32 values.
                     format: wgpu::VertexFormat::Float32x3,
                 },
                 wgpu::VertexAttribute {
-                    // @location(1) in the shader: color.
                     shader_location: 1,
-                    // Starts after the position field (3 * 4 = 12 bytes in).
                     offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    // Three f32 values.
                     format: wgpu::VertexFormat::Float32x3,
                 },
             ],
@@ -55,7 +41,7 @@ impl Vertex {
 }
 
 /// Owns all wgpu state for a single window surface.
-/// 
+///
 /// Created once during application startup and used each frame
 /// to submit draw calls to the GPU.
 pub struct Renderer {
@@ -80,7 +66,7 @@ pub struct Renderer {
     /// The surface configuration, including size and format.
     config: wgpu::SurfaceConfiguration,
 
-    /// The renderer pipeline describing the shaders and draw settings.
+    /// The render pipeline describing the shaders and draw settings.
     pipeline: wgpu::RenderPipeline,
 
     /// The GPU buffer holding the triangle's vertex data.
@@ -89,14 +75,28 @@ pub struct Renderer {
     /// The number of vertices in the vertex buffer.
     vertex_count: u32,
 
+    /// The uniform buffer holding the VP matrix for the current frame.
+    ///
+    /// Written once per frame before any draw calls.
+    /// Bound at group(0) binding(0).
+    vp_uniform_buffer: wgpu::Buffer,
+
+    /// The bind group layout for group(0): per-frame data.
+    vp_bind_group_layout: wgpu::BindGroupLayout,
+
+    /// The bind group connecting the VP uniform buffer to the shader.
+    vp_bind_group: wgpu::BindGroup,
+
     /// The uniform buffer holding the model matrix for the current draw call.
-    uniform_buffer: wgpu::Buffer,
+    ///
+    /// Written once per entity. Bound at group(1) binding(0).
+    model_uniform_buffer: wgpu::Buffer,
 
-    /// The bind group layout describing what the shader expects at group 0.
-    bind_group_layout: wgpu::BindGroupLayout,
+    /// The bind group layout for group(1): per-draw data.
+    model_bind_group_layout: wgpu::BindGroupLayout,
 
-    /// The bind group connecting the uniform buffer to the shader.
-    bind_group: wgpu::BindGroup,
+    /// The bind group connecting the model uniform buffer to the shader.
+    model_bind_group: wgpu::BindGroup,
 }
 
 const VERTICES: &[Vertex] = &[
@@ -107,27 +107,20 @@ const VERTICES: &[Vertex] = &[
 
 impl Renderer {
     /// Creates a new renderer attached to the given window.
-    /// 
+    ///
     /// This is async because wgpu adapter and device requests are
     /// async operations. Use `pollster::block_on` to call this from
     /// synchronous code.
     pub async fn new(window: Arc<Window>) -> Self {
         let size = window.inner_size();
 
-        // The instance is the entry point to wgpu.
-        // Backends::PRIMARY selects Vulkan on Linux.
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
         });
 
-        // The surface is the wgpu abstraction over the OS window.
-        // The Arc clone keeps the window alive for the surface's lifetime.
         let surface = instance.create_surface(Arc::clone(&window)).unwrap();
 
-        // The adapter represents the physical GPU.
-        // RequestAdapterOptions picks the best available GPU that can
-        // render to our surface
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -137,15 +130,11 @@ impl Renderer {
             .await
             .unwrap();
 
-        // The device and quque are created from the adapter.
-        // The device creates GPU resources; the queue submits commands.
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default(), None)
             .await
             .unwrap();
 
-        // The surface configuration describes the format and size of
-        // the images the surface will produce each frame.
         let surface_caps = surface.get_capabilities(&adapter);
         let format = surface_caps.formats[0];
 
@@ -162,21 +151,28 @@ impl Renderer {
 
         surface.configure(&device, &config);
 
-        // The uniform buffer holds one model matrix (16 floats = 64 bytes).
-        // UNIFORM usage tells wgpu this buffer will be used as a uniform.
-        // COPY_DST allows the CPU to write into it each frame.
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("uniform buffer"),
+        // Per-frame uniform buffer: holds the VP matrix.
+        // Written once at the start of each frame.
+        let vp_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vp uniform buffer"),
             size: 64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        // The bind group layout describes the shape of group(0) in the shader:
-        // one uniform buffer at binding 0, visible to the vertex shader.
-        let bind_group_layout = device.create_bind_group_layout(
+        // Per-draw uniform buffer: holds the model matrix.
+        // Written once per entity draw call.
+        let model_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("model uniform buffer"),
+            size: 64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // group(0): per-frame data. One uniform buffer at binding 0.
+        let vp_bind_group_layout = device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
-                label: Some("bind group layout"),
+                label: Some("vp bind group layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
@@ -190,35 +186,56 @@ impl Renderer {
             }
         );
 
-        // The bind group connects the actual buffer to the layout slot.
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bind group"),
-            layout: &bind_group_layout,
+        // group(1): per-draw data. One uniform buffer at binding 0.
+        let model_bind_group_layout = device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                label: Some("model bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            }
+        );
+
+        let vp_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vp bind group"),
+            layout: &vp_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
+                resource: vp_uniform_buffer.as_entire_binding(),
             }],
         });
 
-        // Load the shader source at compile time.
-        // include_str! embeds the file contents as a &str in the binary.
+        let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("model bind group"),
+            layout: &model_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: model_uniform_buffer.as_entire_binding(),
+            }],
+        });
+
         let shader_source = include_str!("shader.wgsl");
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader"),
             source: wgpu::ShaderSource::Wgsl(shader_source.into()),
         });
 
-        // An empty pipeline layout means the shaders use no external
-        // resources such as textures or uniform buffers.
+        // The pipeline layout lists both bind group layouts in group order.
         let pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("pipeline layout"),
-                bind_group_layouts: &[&bind_group_layout],
+                bind_group_layouts: &[&vp_bind_group_layout, &model_bind_group_layout],
                 push_constant_ranges: &[],
             }
         );
 
-        
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("render pipeline"),
             layout: Some(&pipeline_layout),
@@ -257,9 +274,6 @@ impl Renderer {
             cache: None,
         });
 
-        // Upload the vertex data into a GPU buffer.
-        // VERTEX usage tells wgpu this buffer will be used as a vertex buffer.
-        // COPY_DST allows data to be written into it from the CPU.
         use wgpu::util::DeviceExt;
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vertex buffer"),
@@ -279,15 +293,18 @@ impl Renderer {
             pipeline,
             vertex_buffer,
             vertex_count,
-            uniform_buffer,
-            bind_group_layout,
-            bind_group,
+            vp_uniform_buffer,
+            vp_bind_group_layout,
+            vp_bind_group,
+            model_uniform_buffer,
+            model_bind_group_layout,
+            model_bind_group,
         }
     }
 
     /// Resizes the surface to match the new window size.
-    /// 
-    /// Called whenever a WindowEvent::Resized is recieved.
+    ///
+    /// Called whenever a WindowEvent::Resized is received.
     /// Does nothing if either dimension is zero, which can happen
     /// when the window is minimized.
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -300,21 +317,37 @@ impl Renderer {
         self.surface.configure(&self.device, &self.config);
     }
 
-    /// Renders one frame.
-    /// 
-    /// Clears the screen to a solid color to confirm the pipeline
-    /// is working. Returns early if the surface is lost, which can
-    /// happen when the window is minimized or resized mid-frame.
-    pub fn render(&mut self, model_matrix: [[f32; 4]; 4]) -> bool {
-        // Write the model matrix into the uniform buffer.
-        // cast_slice reinterprets the matrix as raw bytes for the GPU.
+    /// Returns the current surface width divided by height.
+    ///
+    /// Used by the render system to keep the camera aspect ratio in
+    /// sync with the window size.
+    pub fn aspect_ratio(&self) -> f32 {
+        self.config.width as f32 / self.config.height as f32
+    }
+
+    /// Writes the VP matrix into the per-frame uniform buffer.
+    ///
+    /// Call this once per frame before any draw calls.
+    pub fn set_vp_matrix(&mut self, vp_matrix: [[f32; 4]; 4]) {
         self.queue.write_buffer(
-            &self.uniform_buffer,
+            &self.vp_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&vp_matrix),
+        );
+    }
+
+    /// Renders one frame.
+    ///
+    /// Clears the screen, then draws one mesh per model matrix supplied.
+    /// Returns early if the surface is lost, which can happen when the
+    /// window is minimized or resized mid-frame.
+    pub fn render(&mut self, model_matrix: [[f32; 4]; 4]) -> bool {
+        self.queue.write_buffer(
+            &self.model_uniform_buffer,
             0,
             bytemuck::cast_slice(&model_matrix),
         );
 
-        // Get the next texture to render into.
         let output = match self.surface.get_current_texture() {
             Ok(texture) => texture,
             Err(wgpu::SurfaceError::Lost) => {
@@ -324,19 +357,15 @@ impl Renderer {
             Err(_) => return false,
         };
 
-        // A view describes how to access the texture.
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // A command encoder records GPU commands before they are submitted.
         let mut encoder = self.device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor { label: Some("render encoder") }
         );
 
-        // A render pass describes what to draw and where to draw it.
-        // This one just clears the screen to a dark grey.
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("clear pass"),
+                label: Some("render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -356,12 +385,12 @@ impl Renderer {
             });
 
             pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_bind_group(0, &self.vp_bind_group, &[]);
+            pass.set_bind_group(1, &self.model_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             pass.draw(0..self.vertex_count, 0..1);
         }
 
-        // Submit the recorded commands to the GPU and present the frame.
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
