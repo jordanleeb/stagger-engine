@@ -5,7 +5,11 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
+use crate::render::camera::{ActiveCamera, Camera};
+use crate::render::material::Material;
+use crate::render::mesh::{Mesh, Vertex};
 use crate::render::renderer::Renderer;
+use crate::render::transform::Transform;
 use crate::ecs::world::World;
 
 /// Owns the window and renderer, and responds to OS events.
@@ -41,31 +45,41 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let attributes = Window::default_attributes().with_title("Stagger");
         let window = Arc::new(event_loop.create_window(attributes).unwrap());
-        let renderer = pollster::block_on(Renderer::new(Arc::clone(&window)));
+        let mut renderer = pollster::block_on(Renderer::new(Arc::clone(&window)));
 
         self.window = Some(window);
 
         // Register components.
-        self.world.register_component::<crate::render::transform::Transform>();
-        self.world.register_component::<crate::render::camera::Camera>();
+        self.world.register_component::<Transform>();
+        self.world.register_component::<Camera>();
+        self.world.register_component::<Mesh>();
+        self.world.register_component::<Material>();
 
-        // Insert the renderer as a resource so systems can access it.
+        // Upload the test triangle mesh.
+        let triangle_id = renderer.upload_mesh(&[
+            Vertex { position: [0.0,  0.5, 0.0], color: [1.0, 0.0, 0.0] },
+            Vertex { position: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
+            Vertex { position: [0.5, -0.5, 0.0], color: [0.0, 0.0, 1.0] },
+        ]);
+
         self.world.insert_resource(renderer);
 
-        // Spawn the camera entity with a default perspective projection
-        // and a transform positioned 3 units back from the origin.
+        // Spawn the camera entity.
         let camera = self.world.spawn();
-        self.world.add_component(camera, crate::render::transform::Transform {
+        self.world.add_component(camera, Transform {
             position: [0.0, 0.0, 3.0],
             rotation: [0.0, 0.0, 0.0],
             scale: [1.0, 1.0, 1.0],
         });
-        self.world.add_component(camera, crate::render::camera::Camera::default_perspective());
-        self.world.insert_resource(crate::render::camera::ActiveCamera::new(camera));
+        self.world.add_component(camera, Camera::default_perspective());
+        self.world.insert_resource(ActiveCamera::new(camera));
 
-        // Spawn a test entity at the origin.
+        // Spawn a test entity at the origin with the triangle mesh
+        // and a white material so per-vertex colors show through.
         let e = self.world.spawn();
-        self.world.add_component(e, crate::render::transform::Transform::identity());
+        self.world.add_component(e, Transform::identity());
+        self.world.add_component(e, Mesh::new(triangle_id));
+        self.world.add_component(e, Material::white());
     }
 
     /// Called for every event that belongs to a window.

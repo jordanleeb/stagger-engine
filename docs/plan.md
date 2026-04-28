@@ -34,7 +34,7 @@
 - [x] Renderer backend
 - [x] Transform-driven rendering
 - [x] Camera component and render system
-- [ ] Mesh and material components
+- [x] Mesh and material components
 - [ ] Debug rendering
 
 ## Phase 4

@@ -1,43 +1,23 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use winit::window::Window;
 
-/// One vertex in a mesh.
+use crate::render::mesh::{GpuMesh, Mesh, MeshId, MeshStore, Vertex};
+
+/// One draw call's worth of per-entity data.
 ///
-/// The layout of this struct must match the vertex buffer layout
-/// passed to the pipeline and the @location attributes in the shader.
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Vertex {
-    /// Position in clip space.
-    pub position: [f32; 3],
+/// Passed to `Renderer::render_frame` in a slice, one entry per
+/// renderable entity. The renderer writes all entries into the
+/// dynamic offset uniform buffer before issuing any draw calls.
+pub struct DrawCall {
+    /// The model matrix for this entity.
+    pub model_matrix: [[f32; 4]; 4],
 
-    /// RGB color for this vertex.
-    pub color: [f32; 3],
-}
+    /// The material base color for this entity.
+    pub material_color: [f32; 3],
 
-impl Vertex {
-    /// Returns the wgpu vertex buffer layout for this type.
-    ///
-    /// This tells the pipeline how to interpret the raw bytes in the
-    /// vertex buffer: where each attribute starts and what type it is.
-    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    shader_location: 0,
-                    offset: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    shader_location: 1,
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-            ],
-        }
-    }
+    /// The mesh to draw for this entity.
+    pub mesh_id: MeshId,
 }
 
 /// Owns all wgpu state for a single window surface.
@@ -69,15 +49,9 @@ pub struct Renderer {
     /// The render pipeline describing the shaders and draw settings.
     pipeline: wgpu::RenderPipeline,
 
-    /// The GPU buffer holding the triangle's vertex data.
-    vertex_buffer: wgpu::Buffer,
-
-    /// The number of vertices in the vertex buffer.
-    vertex_count: u32,
-
     /// The uniform buffer holding the VP matrix for the current frame.
     ///
-    /// Written once per frame before any draw calls.
+    /// Written once at the start of each frame before any draw calls.
     /// Bound at group(0) binding(0).
     vp_uniform_buffer: wgpu::Buffer,
 
@@ -87,23 +61,38 @@ pub struct Renderer {
     /// The bind group connecting the VP uniform buffer to the shader.
     vp_bind_group: wgpu::BindGroup,
 
-    /// The uniform buffer holding the model matrix for the current draw call.
+    /// The dynamic offset uniform buffer holding per-draw data for all entities.
     ///
-    /// Written once per entity. Bound at group(1) binding(0).
-    model_uniform_buffer: wgpu::Buffer,
+    /// Each entity occupies one 256-byte aligned slot containing its
+    /// model matrix (64 bytes) and material color (16 bytes, padded from 12).
+    /// The GPU reads from the correct slot via a dynamic offset passed to
+    /// set_bind_group each draw call.
+    per_draw_buffer: wgpu::Buffer,
 
     /// The bind group layout for group(1): per-draw data.
-    model_bind_group_layout: wgpu::BindGroupLayout,
+    per_draw_bind_group_layout: wgpu::BindGroupLayout,
 
-    /// The bind group connecting the model uniform buffer to the shader.
-    model_bind_group: wgpu::BindGroup,
+    /// The bind group connecting the per-draw buffer to the shader.
+    per_draw_bind_group: wgpu::BindGroup,
+
+    /// The maximum number of entities the per-draw buffer can hold.
+    ///
+    /// Determines the size of `per_draw_buffer` at creation time.
+    per_draw_capacity: usize,
+
+    /// All uploaded meshes owned by the renderer.
+    mesh_store: MeshStore,
 }
 
-const VERTICES: &[Vertex] = &[
-    Vertex { position: [0.0,  0.5, 0.0], color: [1.0, 0.0, 0.0] },
-    Vertex { position: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
-    Vertex { position: [0.5, -0.5, 0.0], color: [0.0, 0.0, 1.0] },
-];
+/// Byte stride between per-draw slots in the dynamic offset buffer.
+///
+/// Must be a multiple of `min_uniform_buffer_offset_alignment` (256 on
+/// most hardware). Each slot holds 80 bytes of actual data with 176 bytes
+/// of padding.
+const PER_DRAW_STRIDE: usize = 256;
+
+/// Initial capacity of the per-draw buffer in number of entities.
+const INITIAL_PER_DRAW_CAPACITY: usize = 1024;
 
 impl Renderer {
     /// Creates a new renderer attached to the given window.
@@ -152,7 +141,6 @@ impl Renderer {
         surface.configure(&device, &config);
 
         // Per-frame uniform buffer: holds the VP matrix.
-        // Written once at the start of each frame.
         let vp_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vp uniform buffer"),
             size: 64,
@@ -160,16 +148,17 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
-        // Per-draw uniform buffer: holds the model matrix.
-        // Written once per entity draw call.
-        let model_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("model uniform buffer"),
-            size: 64,
+        // Per-draw dynamic offset buffer: holds model matrix and material
+        // color for every entity, packed into 256-byte aligned slots.
+        let per_draw_capacity = INITIAL_PER_DRAW_CAPACITY;
+        let per_draw_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("per draw buffer"),
+            size: (per_draw_capacity * PER_DRAW_STRIDE) as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        // group(0): per-frame data. One uniform buffer at binding 0.
+        // group(0): per-frame data.
         let vp_bind_group_layout = device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
                 label: Some("vp bind group layout"),
@@ -186,16 +175,16 @@ impl Renderer {
             }
         );
 
-        // group(1): per-draw data. One uniform buffer at binding 0.
-        let model_bind_group_layout = device.create_bind_group_layout(
+        // group(1): per-draw data with a dynamic offset.
+        let per_draw_bind_group_layout = device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
-                label: Some("model bind group layout"),
+                label: Some("per draw bind group layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
+                        has_dynamic_offset: true,
                         min_binding_size: None,
                     },
                     count: None,
@@ -208,16 +197,26 @@ impl Renderer {
             layout: &vp_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: vp_uniform_buffer.as_entire_binding(),
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &vp_uniform_buffer,
+                    offset: 0,
+                    size: None,
+                }),
             }],
         });
 
-        let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("model bind group"),
-            layout: &model_bind_group_layout,
+        // The per-draw bind group points at the start of the buffer.
+        // The actual per-entity offset is supplied at draw time via set_bind_group.
+        let per_draw_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("per draw bind group"),
+            layout: &per_draw_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: model_uniform_buffer.as_entire_binding(),
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &per_draw_buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(PER_DRAW_STRIDE as u64),
+                }),
             }],
         });
 
@@ -227,11 +226,10 @@ impl Renderer {
             source: wgpu::ShaderSource::Wgsl(shader_source.into()),
         });
 
-        // The pipeline layout lists both bind group layouts in group order.
         let pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("pipeline layout"),
-                bind_group_layouts: &[&vp_bind_group_layout, &model_bind_group_layout],
+                bind_group_layouts: &[&vp_bind_group_layout, &per_draw_bind_group_layout],
                 push_constant_ranges: &[],
             }
         );
@@ -274,15 +272,6 @@ impl Renderer {
             cache: None,
         });
 
-        use wgpu::util::DeviceExt;
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("vertex buffer"),
-            contents: bytemuck::cast_slice(VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let vertex_count = VERTICES.len() as u32;
-
         Self {
             instance,
             surface,
@@ -291,14 +280,14 @@ impl Renderer {
             queue,
             config,
             pipeline,
-            vertex_buffer,
-            vertex_count,
             vp_uniform_buffer,
             vp_bind_group_layout,
             vp_bind_group,
-            model_uniform_buffer,
-            model_bind_group_layout,
-            model_bind_group,
+            per_draw_buffer,
+            per_draw_bind_group_layout,
+            per_draw_bind_group,
+            per_draw_capacity,
+            mesh_store: MeshStore::new(),
         }
     }
 
@@ -325,28 +314,59 @@ impl Renderer {
         self.config.width as f32 / self.config.height as f32
     }
 
-    /// Writes the VP matrix into the per-frame uniform buffer.
+    /// Uploads vertex data to the GPU and returns the assigned `MeshId`.
     ///
-    /// Call this once per frame before any draw calls.
-    pub fn set_vp_matrix(&mut self, vp_matrix: [[f32; 4]; 4]) {
+    /// Delegates to the internal `MeshStore`. The CPU-side slice is not
+    /// retained after this call.
+    pub fn upload_mesh(&mut self, vertices: &[Vertex]) -> MeshId {
+        self.mesh_store.upload(&self.device, vertices)
+    }
+
+    /// Renders one complete frame from a list of draw calls.
+    ///
+    /// Writes the VP matrix and all per-draw data to the GPU once,
+    /// then issues one draw call per entry using dynamic offsets to
+    /// isolate each entity's uniform data.
+    ///
+    /// Returns `false` if the surface is lost.
+    pub fn render_frame(
+        &mut self,
+        vp_matrix: [[f32; 4]; 4],
+        draw_calls: &[DrawCall],
+    ) -> bool {
+        // Write the VP matrix into the per-frame buffer.
         self.queue.write_buffer(
             &self.vp_uniform_buffer,
             0,
             bytemuck::cast_slice(&vp_matrix),
         );
-    }
 
-    /// Renders one frame.
-    ///
-    /// Clears the screen, then draws one mesh per model matrix supplied.
-    /// Returns early if the surface is lost, which can happen when the
-    /// window is minimized or resized mid-frame.
-    pub fn render(&mut self, model_matrix: [[f32; 4]; 4]) -> bool {
-        self.queue.write_buffer(
-            &self.model_uniform_buffer,
-            0,
-            bytemuck::cast_slice(&model_matrix),
-        );
+        // Pack all per-draw data into the dynamic offset buffer.
+        //
+        // Each slot is PER_DRAW_STRIDE bytes. The model matrix occupies
+        // the first 64 bytes, the padded material color the next 16.
+        for (i, draw) in draw_calls.iter().enumerate() {
+            let offset = (i * PER_DRAW_STRIDE) as u64;
+
+            self.queue.write_buffer(
+                &self.per_draw_buffer,
+                offset,
+                bytemuck::cast_slice(&draw.model_matrix),
+            );
+
+            let padded = [
+                draw.material_color[0],
+                draw.material_color[1],
+                draw.material_color[2],
+                0.0f32,
+            ];
+
+            self.queue.write_buffer(
+                &self.per_draw_buffer,
+                offset + 64,
+                bytemuck::cast_slice(&padded),
+            );
+        }
 
         let output = match self.surface.get_current_texture() {
             Ok(texture) => texture,
@@ -386,9 +406,16 @@ impl Renderer {
 
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.vp_bind_group, &[]);
-            pass.set_bind_group(1, &self.model_bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.draw(0..self.vertex_count, 0..1);
+
+            for (i, draw) in draw_calls.iter().enumerate() {
+                let offset = (i * PER_DRAW_STRIDE) as u32;
+
+                if let Some(mesh) = self.mesh_store.get(draw.mesh_id) {
+                    pass.set_bind_group(1, &self.per_draw_bind_group, &[offset]);
+                    pass.set_vertex_buffer(0, mesh.buffer().slice(..));
+                    pass.draw(0..mesh.vertex_count(), 0..1);
+                }
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

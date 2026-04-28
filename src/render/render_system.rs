@@ -1,38 +1,32 @@
 use crate::render::camera::{ActiveCamera, Camera};
-use crate::render::renderer::Renderer;
+use crate::render::material::Material;
+use crate::render::mesh::Mesh;
+use crate::render::renderer::{DrawCall, Renderer};
 use crate::render::transform::Transform;
 use crate::ecs::world::World;
 
-/// Draws one mesh per entity that has a Transform but not a Camera component.
+/// Draws one mesh per entity that has a Transform, Mesh, and Material component.
 ///
 /// Reads the active camera resource to build the VP matrix once per frame,
-/// then passes a model matrix to the renderer for each matching entity.
-///
-/// Camera entities are excluded from the mesh draw query because they
-/// have no geometry. Once mesh components are added, the query will
-/// require those instead.
+/// then collects one DrawCall per renderable entity and submits them all
+/// to the renderer in a single render_frame call.
 pub fn render_system(world: &mut World) {
-    // Read the current aspect ratio from the renderer.
     let aspect = match world.get_resource::<Renderer>() {
         Some(r) => r.aspect_ratio(),
         None => return,
     };
 
-    // Read the active camera entity.
     let camera_entity = match world.get_resource::<ActiveCamera>() {
         Some(a) => a.entity,
         None => return,
     };
 
-    // Keep the camera aspect ratio in sync with the window size.
     if let Some(camera) = world.get_component_mut::<Camera>(camera_entity) {
         camera.aspect = aspect;
     }
 
     // Build the VP matrix from the camera projection and its transform.
-    //
-    // Projection comes from the Camera component; view comes from the
-    // Transform on the same entity. VP = projection * view.
+    // VP = projection * view.
     let vp_matrix = {
         let proj = match world.get_component::<Camera>(camera_entity) {
             Some(c) => c.to_projection_matrix(),
@@ -47,39 +41,45 @@ pub fn render_system(world: &mut World) {
         mat4_mul(proj, view)
     };
 
-    // Write the VP matrix to the GPU once before any draw calls.
-    if let Some(renderer) = world.get_resource_mut::<Renderer>() {
-        renderer.set_vp_matrix(vp_matrix);
-    }
-
-    // Collect model matrices from all renderable entities.
+    // Collect one DrawCall per renderable entity.
     //
     // The query borrows the world immutably, so the renderer must be
     // accessed after the query is dropped.
     let transform_id = world.component_id::<Transform>().unwrap();
+    let mesh_id_component = world.component_id::<Mesh>().unwrap();
+    let material_id = world.component_id::<Material>().unwrap();
 
-    let matrices: Vec<[[f32; 4]; 4]> = {
+    let draw_calls: Vec<DrawCall> = {
         let query = world
             .query_builder()
             .require::<Transform>()
+            .require::<Mesh>()
+            .require::<Material>()
             .exclude::<Camera>()
             .build();
 
         query
             .iter()
             .map(|row| {
-                row.get::<Transform>(transform_id)
+                let model_matrix = row.get::<Transform>(transform_id)
                     .unwrap()
-                    .to_model_matrix()
+                    .to_model_matrix();
+
+                let mesh_id = row.get::<Mesh>(mesh_id_component)
+                    .unwrap()
+                    .id;
+
+                let material_color = row.get::<Material>(material_id)
+                    .unwrap()
+                    .color;
+
+                DrawCall { model_matrix, material_color, mesh_id }
             })
             .collect()
     };
 
     let renderer = world.get_resource_mut::<Renderer>().unwrap();
-
-    for matrix in matrices {
-        renderer.render(matrix);
-    }
+    renderer.render_frame(vp_matrix, &draw_calls);
 }
 
 /// Multiplies two column-major 4x4 matrices, returning a * b.
