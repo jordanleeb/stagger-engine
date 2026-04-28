@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::any::{Any, TypeId};
+use std::collections::HashMap;
 
 use crate::ecs::archetype::{Archetype, ArchetypeId, ArchetypeSignature, RowMoveResult};
 use crate::ecs::column::Column;
@@ -34,7 +34,7 @@ pub struct World {
     components: ComponentRegistry,
 
     /// Maps `entity.index` directly to that entity's archetype location.
-    /// 
+    ///
     /// Indexed by `entity.index`, so its length grows with the highest index
     /// ever allocated rather than the current alive count. The free-list
     /// allocator keeps indices compact (reusing slots before growing), so this
@@ -44,13 +44,13 @@ pub struct World {
     empty_archetype: ArchetypeId,
 
     /// Maps each archetype's component ID set to its index in `archetypes`.
-    /// 
+    ///
     /// This allows `find_archetype_by_signature` to run in O(1) rather than
     /// scanning every archetype on every structural change.
     archetype_index: HashMap<Vec<ComponentId>, ArchetypeId>,
 
     /// Stores singleton resources keyed by their type.
-    /// 
+    ///
     /// Each type may have at most one resource instance.
     /// Resources are accessible to systems via get_resource and
     /// get_resource_mut without being tied to any entity.
@@ -169,6 +169,7 @@ impl World {
         self.empty_archetype = 0;
         self.archetype_index.clear();
         self.archetype_index.insert(vec![], 0);
+        self.resources.clear();
     }
 
     fn ensure_entity_slot(&mut self, entity: Entity) {
@@ -239,9 +240,7 @@ impl World {
 
     fn find_archetype_by_signature(&self, signature: &ArchetypeSignature) -> Option<ArchetypeId> {
         // The index maps each sorted component ID set to its archetype's position.
-        self.archetype_index
-            .get(signature.component_ids())
-            .copied()
+        self.archetype_index.get(signature.component_ids()).copied()
     }
 
     fn find_or_create_archetype(&mut self, signature: ArchetypeSignature) -> ArchetypeId {
@@ -251,7 +250,7 @@ impl World {
 
         let columns = self.build_columns_for_signature(&signature);
         let id = self.archetypes.len() as ArchetypeId;
-        
+
         // Register the new signature before pushing so the index is always in sync.
         self.archetype_index
             .insert(signature.component_ids().to_vec(), id);
@@ -565,7 +564,7 @@ impl World {
         let destination_archetype = match cached {
             Some(id) => id,
             None => {
-                let destination_signature = 
+                let destination_signature =
                     self.signature_with_removed(&source_signature, component_id);
                 let id = self.find_or_create_archetype(destination_signature);
 
@@ -608,9 +607,9 @@ impl World {
     }
 
     /// Returns the IDs of every archetype that satisfies `filter`.
-    /// 
+    ///
     /// Archetypes are checked in ID order. The returned list preserves that order.
-    /// 
+    ///
     /// This is O(A * C) where A is the archetype count and C is the number of
     /// filter terms, but is called at query-construction time rather than per-frame,
     /// so the cost is amortized.
@@ -624,11 +623,11 @@ impl World {
     }
 
     /// Returns a compiled query over all archetypes that satisfy `filter`.
-    /// 
+    ///
     /// The returned `Query<'_>` borrows from the world and holds shared
     /// references into archetype storage. The world cannot be mutated while
     /// the query is alive.
-    /// 
+    ///
     /// The query captures the matching archetype set at the moment it is built.
     /// Archetypes created after this call are not included.
     pub fn query_with_filter(&self, filter: QueryFilter) -> Query<'_> {
@@ -642,16 +641,16 @@ impl World {
     }
 
     /// Returns a `QueryBuilder` for constructing a typed query over this world.
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```
     /// let query = world
     ///     .query_builder()
     ///     .require::<Position>()
     ///     .require::<Velocity>()
     ///     .build();
-    /// 
+    ///
     /// for row in &query {
     ///     let pos = row.get::<Position>(pos_id).unwrap();
     /// }
@@ -661,7 +660,7 @@ impl World {
     }
 
     /// Returns a reference to the component of type `T` for the given entity.
-    /// 
+    ///
     /// Returns `None` if:
     /// - The entity is not alive.
     /// - The component type has not been registered.
@@ -674,7 +673,7 @@ impl World {
     }
 
     /// Returns a mutable reference to the component of type `T` for the given entity.
-    /// 
+    ///
     /// Returns `None` if:
     /// - The entity is not alive.
     /// - The component type has not been registered.
@@ -689,7 +688,7 @@ impl World {
     }
 
     /// Returns `true` if the entity is alive and has a component of type `T`.
-    /// 
+    ///
     /// Returns `false` if:
     /// - The entity is not alive.
     /// - The component type has not been registered.
@@ -699,7 +698,7 @@ impl World {
     }
 
     /// Inserts a resource of type `T` into the world.
-    /// 
+    ///
     /// If a resource of this type already exists, it is replaced.
     pub fn insert_resource<T: 'static>(&mut self, value: T) {
         self.resources.insert(TypeId::of::<T>(), Box::new(value));
@@ -713,7 +712,7 @@ impl World {
     }
 
     /// Returns a mutable reference to the resource of type `T`.
-    /// 
+    ///
     /// Return `None` if no resources of this type has been inserted.
     pub fn get_resource_mut<T: 'static>(&mut self) -> Option<&mut T> {
         self.resources
@@ -769,6 +768,16 @@ mod tests {
         assert!(!world.is_alive(e));
         assert_eq!(world.component_id::<Position>(), None);
         assert!(!world.has_component_type::<Position>());
+    }
+
+    #[test]
+    fn clear_removes_resources() {
+        let mut world = World::new();
+
+        world.insert_resource(123_u32);
+        world.clear();
+
+        assert_eq!(world.get_resource::<u32>(), None);
     }
 
     #[test]
@@ -1225,7 +1234,10 @@ mod tests {
     #[test]
     fn get_component_returns_none_for_unregistered_type() {
         let world = World::new();
-        let e = Entity { index: 0, generation: 0 };
+        let e = Entity {
+            index: 0,
+            generation: 0,
+        };
 
         assert_eq!(world.get_component::<u32>(e), None);
     }
@@ -1267,7 +1279,10 @@ mod tests {
     #[test]
     fn get_component_mut_returns_none_for_unregistered_type() {
         let mut world = World::new();
-        let e = Entity { index: 0, generation: 0 };
+        let e = Entity {
+            index: 0,
+            generation: 0,
+        };
 
         assert_eq!(world.get_component_mut::<u32>(e), None);
     }
@@ -1307,7 +1322,10 @@ mod tests {
     #[test]
     fn has_component_returns_false_for_unregistered_type() {
         let world = World::new();
-        let e = Entity { index: 0, generation: 0 };
+        let e = Entity {
+            index: 0,
+            generation: 0,
+        };
 
         assert!(!world.has_component::<u32>(e));
     }
