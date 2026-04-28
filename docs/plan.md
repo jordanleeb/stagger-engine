@@ -36,6 +36,12 @@
 - [x] Camera component and render system
 - [x] Mesh and material components
 - [ ] Debug rendering
+  - [ ] Line renderer for vectors and edges
+  - [ ] Wireframe collision shapes (boxes, spheres, capsules)
+  - [ ] Contact point and normal visualizers
+  - [ ] Raycast visualizers
+  - [ ] Bounding volume visualizers
+  - [ ] Debug draw API accessible from physics systems
 
 ## Phase 4
 - [ ] Physics engine
