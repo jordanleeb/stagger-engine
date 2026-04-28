@@ -101,13 +101,13 @@ pub struct Archetype {
     columns: Vec<Column>,
 
     /// Cached destination archetype IDs for single-component additions.
-    /// 
+    ///
     /// `add_edges[id]` is the archetype reached by adding component `id`
     /// to this one. Populated lazily on first structural transition.
     add_edges: HashMap<ComponentId, ArchetypeId>,
 
     /// Cached destination archetype IDs for single-component removals.
-    /// 
+    ///
     /// `remove_edges[id]` is the archetype reached by removing component `id`
     /// from this one. Populated lazily on first structural transition.
     remove_edges: HashMap<ComponentId, ArchetypeId>,
@@ -384,6 +384,106 @@ impl Archetype {
             destination_row,
             swapped_entity,
         })
+    }
+
+    /// Moves one entity row into `destination` and returns one removed component.
+    ///
+    /// Shared components are moved into destination columns. The component matching
+    /// `taken_id` is moved out and returned instead of being dropped or copied into
+    /// the destination.
+    ///
+    /// Source compaction is performed before returning so all columns remain
+    /// row-aligned.
+    pub fn move_row_to_and_take<T: 'static>(
+        &mut self,
+        source_row: usize,
+        destination: &mut Archetype,
+        taken_id: ComponentId,
+    ) -> Option<(RowMoveResult, T)> {
+        self.debug_assert_row_alignment();
+
+        if source_row >= self.entities.len() {
+            return None;
+        }
+
+        let removed_entity = self.entities[source_row];
+        let last_row = self.entities.len() - 1;
+        let source_component_ids = self.signature.component_ids().to_vec();
+
+        if !self.signature.contains(taken_id) {
+            return None;
+        }
+
+        let destination_row = destination.push_entity(removed_entity);
+        let mut taken_value = None;
+
+        for component_id in &source_component_ids {
+            let src_index = self
+                .column_index(*component_id)
+                .expect("source column missing for source signature component");
+
+            if *component_id == taken_id {
+                let src_column = &mut self.columns[src_index];
+                taken_value = Some(src_column.take_without_compacting::<T>(source_row)?);
+                continue;
+            }
+
+            if let Some(dst_index) = destination.column_index(*component_id) {
+                let src_column = &mut self.columns[src_index];
+                let dst_column = &mut destination.columns[dst_index];
+
+                let moved = src_column.move_to_other_without_compacting(source_row, dst_column);
+                debug_assert!(moved, "shared component move failed");
+            } else {
+                let src_column = &mut self.columns[src_index];
+
+                let removed = src_column.drop_in_place_at(source_row);
+                debug_assert!(removed, "removed component drop failed");
+            }
+        }
+
+        if source_row != last_row {
+            for component_id in &source_component_ids {
+                let src_index = self
+                    .column_index(*component_id)
+                    .expect("source column missing during compaction");
+
+                let src_column = &mut self.columns[src_index];
+
+                let overwritten = src_column.overwrite_with_last(source_row);
+                debug_assert!(overwritten, "source column overwrite failed");
+            }
+        }
+
+        for component_id in &source_component_ids {
+            let src_index = self
+                .column_index(*component_id)
+                .expect("source column missing during shrink");
+
+            let src_column = &mut self.columns[src_index];
+
+            let shrunk = src_column.shrink_len_by_one();
+            debug_assert!(shrunk, "source column shrink failed");
+        }
+
+        let removed = self.entities.swap_remove(source_row);
+        debug_assert_eq!(removed, removed_entity);
+
+        let swapped_entity = if source_row < self.entities.len() {
+            Some(self.entities[source_row])
+        } else {
+            None
+        };
+
+        self.debug_assert_row_alignment();
+
+        Some((
+            RowMoveResult {
+                destination_row,
+                swapped_entity,
+            },
+            taken_value.expect("removed component was not taken"),
+        ))
     }
 }
 

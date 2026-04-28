@@ -1,42 +1,42 @@
 use crate::ecs::world::World;
 
 /// A named, callable unit of game logic.
-/// 
+///
 /// A `System` wraps an arbitrary `FnMut(&mut` closure and gives it a
 /// human-readable name for use in diagnostics and debugging.
-/// 
+///
 /// Each call to [`System::run`] passes exclusive access to the world to the
 /// stored closure. Because the closure is `FnMut`, a system may accumulate
 /// state between runs. For example, to track elapsed time or frame counts.
-/// 
+///
 /// # Read-then-write pattern
-/// 
+///
 /// Queries borrow the world immutably (`&World`), while structural mutations
 /// such as adding and removing components require `&mut World`. A system that
 /// both reads and writes must therefore follow the collect-then-apply pattern:
-/// 
+///
 /// 1. Build a query and collect the data you need into a temporary `Vec`.
 /// 2. Drop the query to release the immutable borrow.
 /// 3. Apply mutations using the now-available `&mut World`.
-/// 
+///
 /// This is the same pattern used in the world's integration tests and is the
 /// expected idiom for all read-modify-write systems.
 pub struct System {
     /// A human-readable label used in diagnostics and debug output.
-    /// 
+    ///
     /// `&'static str` avoids allocation for the common case of a string literal.
     /// The name is not required to be unique.
     name: &'static str,
 
     /// The closure implementing this system's logic.
-    /// 
+    ///
     /// Stored as a boxed trait object so that any `FnMut(&mut World` closure,
     /// regardless of its captured state, can be held uniformly in a collection.
-    /// 
+    ///
     /// `FnMut` (rather than `Fn`) is required because closures that mutate
     /// captured state between calls, such as timers or frame counters, must be
     /// supported.
-    /// 
+    ///
     /// The `'static` bound ensures the closure does not capture short-lived
     /// references, which would make it unsafe to store inside a long-lived
     /// schedule.
@@ -45,9 +45,9 @@ pub struct System {
 
 impl System {
     /// Creates a new system with the given name and closure.
-    /// 
+    ///
     /// `name` is used only for diagnosis and does not need to be unique.
-    /// 
+    ///
     /// `func` may be any closure that accepts `&mut World` and returns `()`.
     /// The `'static` bound prevents capturing references with shorter lifetimes
     /// than the system itself.
@@ -59,7 +59,7 @@ impl System {
     }
 
     /// Runs the system against the given world.
-    /// 
+    ///
     /// Calls the stored closure with exclusive access to the world.
     /// `&mut self` is required because the closure is `FnMut` and may modify
     /// its own captured state on each invocation.
@@ -74,23 +74,23 @@ impl System {
 }
 
 /// An ordered list of ['System']s that run sequentially each tick.
-/// 
+///
 /// Systems are executed in the order they were added via [`Schedule::add_system`].
 /// There is no parallelism; each system runs to completion before the next one begins.
-/// 
+///
 /// State written by one system is immediately visible to all systems that
 /// follow it in the same call to [`Schedule::run`].
-/// 
+///
 /// # Example
-/// 
+///
 /// ```rust
 /// let mut schedule = Schedule::new();
-/// 
+///
 /// schedule
 ///     .add_system(System::new("physics", physics_fn))
 ///     .add_system(System::new("animation", animation_fn))
 ///     .add_system(System::new("render", render_fn));
-/// 
+///
 /// // Each call runs all systems in insertion order.
 /// loop {
 ///     schedule.run(&mut world);
@@ -98,7 +98,7 @@ impl System {
 /// ```
 pub struct Schedule {
     /// The ordered list of systems to run.
-    /// 
+    ///
     /// Systems are appended in `add_system` and iterated in insertion order
     /// during `run`. Mutable access to each element is required because systems
     /// hold `FnMut` closures that may update their own captured state.
@@ -120,10 +120,10 @@ impl Schedule {
     }
 
     /// Appends a system to the end of the schedule.
-    /// 
+    ///
     /// Systems run in insertion order. Returns `&mut Self` so calls can be
     /// chained fluently:
-    /// 
+    ///
     /// ```rust
     /// schedule
     ///     .add_system(physics)
@@ -136,7 +136,7 @@ impl Schedule {
     }
 
     /// Run every system in order, each with exclusive access to the world.
-    /// 
+    ///
     /// Systems are not isolated from each other's effects: mutations written
     /// by system N are immediately visible to system N+1 within the same call
     /// to `run`.
@@ -155,8 +155,8 @@ impl Schedule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
     use std::cell::Cell;
+    use std::cell::RefCell;
     use std::rc::Rc;
 
     #[test]
@@ -243,7 +243,7 @@ mod tests {
             .add_system(System::new("a", move |_w| log_a.borrow_mut().push(1)))
             .add_system(System::new("b", move |_w| log_b.borrow_mut().push(2)))
             .add_system(System::new("c", move |_w| log_c.borrow_mut().push(3)));
-        
+
         schedule.run(&mut world);
 
         assert_eq!(*log.borrow(), vec![1, 2, 3]);
@@ -264,12 +264,12 @@ mod tests {
             }))
             .add_system(System::new("doubler", move |w| {
                 let current = w.get_component::<u32>(e).copied();
-                
+
                 if let Some(v) = current {
                     w.add_component(e, v * 2);
                 }
             }));
-        
+
         schedule.run(&mut world);
 
         assert_eq!(world.get_component::<u32>(e), Some(&20));
@@ -277,8 +277,14 @@ mod tests {
 
     #[test]
     fn schedule_runs_physics_loop_correctly() {
-        struct Position { x: f32, y: f32 }
-        struct Velocity { x: f32, y: f32 }
+        struct Position {
+            x: f32,
+            y: f32,
+        }
+        struct Velocity {
+            x: f32,
+            y: f32,
+        }
 
         let mut world = World::new();
         let pos_id = world.register_component::<Position>();

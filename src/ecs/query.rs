@@ -1,15 +1,15 @@
+use crate::ecs::archetype::Archetype;
 use crate::ecs::archetype::ArchetypeSignature;
 use crate::ecs::component::ComponentId;
-use crate::ecs::archetype::Archetype;
 use crate::ecs::entity::Entity;
 use crate::ecs::world::World;
 
 /// Describes which archetypes a query matches.
-/// 
+///
 /// A filter holds two lists:
 /// - Required IDs: every listed component must be present.
 /// - Excluded IDs: every listed component must be absent.
-/// 
+///
 /// An empty filter matches all archetypes, including the empty one.
 pub struct QueryFilter {
     /// Component IDs that must all appear in the archetype's signature.
@@ -35,7 +35,7 @@ impl QueryFilter {
     }
 
     /// Adds `id` to the required set.
-    /// 
+    ///
     /// Returns `self` so calls can be chained.
     pub fn requiring(mut self, id: ComponentId) -> Self {
         self.required.push(id);
@@ -43,7 +43,7 @@ impl QueryFilter {
     }
 
     /// Add `id` to excluded set.
-    /// 
+    ///
     /// Returns `self` so calls can be chained.
     pub fn excluding(mut self, id: ComponentId) -> Self {
         self.excluded.push(id);
@@ -61,7 +61,7 @@ impl QueryFilter {
     }
 
     /// Returns `true` if `signature` satisfies this filter.
-    /// 
+    ///
     /// A signature satisfies the filter when:
     /// - It contains every required component ID.
     /// - It contains no excluded component ID.
@@ -72,15 +72,15 @@ impl QueryFilter {
 }
 
 /// A compiled query over a world's archetypes.
-/// 
+///
 /// `Query<'w>` holds a list of references to matching archetypes, all valid
 /// for the lifetime `'w`. The world cannot be mutated while this value is
 /// alive because it holds shared borrows into the world's archetype storage.
-/// 
+///
 /// Created by `World::query_with_filter` or `World::query_builder`.
 pub struct Query<'w> {
     /// References to every archetype that passed the filter at construction time.
-    /// 
+    ///
     /// Stored as direct references rather than IDs to avoid a world lookup on
     /// every iterator step.
     archetypes: Vec<&'w Archetype>,
@@ -88,7 +88,7 @@ pub struct Query<'w> {
 
 impl<'w> Query<'w> {
     /// Creates a query from a list of matching archetype references.
-    /// 
+    ///
     /// Called internally by the world; users should use `World::query_with_filter`
     /// or `World::query_builder` instead.
     pub(crate) fn new(archetypes: Vec<&'w Archetype>) -> Self {
@@ -96,7 +96,7 @@ impl<'w> Query<'w> {
     }
 
     /// Returns an iterator over every entity row across all matching archetypes.
-    /// 
+    ///
     /// Yields a `RowRef<'w>` for each row, which provides access to
     /// the entity handle and typed component values.
     pub fn iter(&self) -> QueryIter<'_, 'w> {
@@ -114,10 +114,10 @@ impl<'w> Query<'w> {
 }
 
 /// Iterates over every entity row across all archetypes in a `Query`.
-/// 
+///
 /// `'q` is the lifetime of the borrow of the `Query`.
 /// `'w` is the lifetime of the world data the query references.
-/// 
+///
 /// The bound `'w: 'q` means "world data must outlive the query borrow",
 /// which is always true since the `Query` itself borrows from the world.
 pub struct QueryIter<'q, 'w: 'q> {
@@ -163,7 +163,7 @@ impl<'q, 'w: 'q> IntoIterator for &'q Query<'w> {
 }
 
 /// A reference to one entity's data within a matching archetype row.
-/// 
+///
 /// Yielded by `QueryIter`. The lifetime `'w` ties every reference obtained
 /// through this type to the world's archetype storage, not to the `RowRef`
 /// value itself. This means you can collect multiple component references
@@ -185,10 +185,10 @@ impl<'w> RowRef<'w> {
     }
 
     /// Returns a reference to the component value of type `T` at this row.
-    /// 
+    ///
     /// Returns `None` if the archetype does not contain `component_id`,
     /// or if `T` does not match the stored type.
-    /// 
+    ///
     /// The returned reference lives for `'w`, the world's lifetime, not
     /// just for the lifetime of `self`. This means you can hold references
     /// to multiple components from the same row simultaneously.
@@ -202,12 +202,12 @@ impl<'w> RowRef<'w> {
 }
 
 /// Builds a `Query` using component types rather than raw IDs.
-/// 
+///
 /// Obtained from `World::query_builder`. Call `require` and `exclude` to
 /// narrow the filter, then `build` to compile it into `Query`.
-/// 
+///
 /// # Panic
-/// 
+///
 /// `require` and `exclude` panic if the given type has not been registered
 /// with the world. Register component types with `World::register_component`
 /// before building any query that references them.
@@ -221,7 +221,7 @@ pub struct QueryBuilder<'w> {
 
 impl<'w> QueryBuilder<'w> {
     /// Creates a new builder for the given world.
-    /// 
+    ///
     /// Called internally by `World::query_builder`; user should not
     /// construct this directly.
     pub(crate) fn new(world: &'w World) -> Self {
@@ -232,11 +232,11 @@ impl<'w> QueryBuilder<'w> {
     }
 
     /// Adds `T` as a required component.
-    /// 
+    ///
     /// Return `self` so calls can be chained.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if `T` has not been registered with the world.
     pub fn require<T: 'static>(mut self) -> Self {
         let id = self
@@ -249,11 +249,11 @@ impl<'w> QueryBuilder<'w> {
     }
 
     /// Add `T` as an excluded component.
-    /// 
+    ///
     /// Returns `self` so calls can be chained.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if `T` has not been registered with the world.
     pub fn exclude<T: 'static>(mut self) -> Self {
         let id = self
@@ -448,7 +448,7 @@ mod tests {
             .build()
             .iter()
             .count();
-        
+
         assert_eq!(manual_count, builder_count);
     }
 

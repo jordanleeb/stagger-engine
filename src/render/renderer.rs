@@ -267,8 +267,8 @@ impl Renderer {
         });
 
         // group(0): per-frame data.
-        let vp_bind_group_layout = device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
+        let vp_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("vp bind group layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -280,12 +280,11 @@ impl Renderer {
                     },
                     count: None,
                 }],
-            }
-        );
+            });
 
         // group(1): per-draw data with a dynamic offset.
-        let per_draw_bind_group_layout = device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
+        let per_draw_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("per draw bind group layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -297,8 +296,7 @@ impl Renderer {
                     },
                     count: None,
                 }],
-            }
-        );
+            });
 
         let vp_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vp bind group"),
@@ -342,22 +340,19 @@ impl Renderer {
         });
 
         // Main pipeline layout: VP at group(0), per-draw at group(1).
-        let pipeline_layout = device.create_pipeline_layout(
-            &wgpu::PipelineLayoutDescriptor {
-                label: Some("pipeline layout"),
-                bind_group_layouts: &[&vp_bind_group_layout, &per_draw_bind_group_layout],
-                push_constant_ranges: &[],
-            }
-        );
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pipeline layout"),
+            bind_group_layouts: &[&vp_bind_group_layout, &per_draw_bind_group_layout],
+            push_constant_ranges: &[],
+        });
 
         // Debug pipeline layout: VP at group(0) only.
-        let debug_pipeline_layout = device.create_pipeline_layout(
-            &wgpu::PipelineLayoutDescriptor {
+        let debug_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("debug pipeline layout"),
                 bind_group_layouts: &[&vp_bind_group_layout],
                 push_constant_ranges: &[],
-            }
-        );
+            });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("render pipeline"),
@@ -573,11 +568,8 @@ impl Renderer {
         let draw_count = draw_calls.len().min(self.per_draw_capacity);
 
         // Write the VP matrix into the per-frame buffer.
-        self.queue.write_buffer(
-            &self.vp_uniform_buffer,
-            0,
-            bytemuck::cast_slice(&vp_matrix),
-        );
+        self.queue
+            .write_buffer(&self.vp_uniform_buffer, 0, bytemuck::cast_slice(&vp_matrix));
 
         // Write all per-draw data into the dynamic offset buffer.
         for (i, draw) in draw_calls[..draw_count].iter().enumerate() {
@@ -636,11 +628,15 @@ impl Renderer {
             Err(_) => return false,
         };
 
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = self.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor { label: Some("render encoder") }
-        );
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("render encoder"),
+            });
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -743,23 +739,65 @@ fn tessellate_debug_tasks(tasks: &[DebugTask]) -> (Vec<DebugVertex>, Vec<DebugVe
 
     for task in tasks {
         match task {
-            DebugTask::Line { start, end, color, end_marker } => {
-                tessellate_line(*start, *end, *color, end_marker.as_ref(), &mut line_verts, &mut mesh_verts);
+            DebugTask::Line {
+                start,
+                end,
+                color,
+                end_marker,
+            } => {
+                tessellate_line(
+                    *start,
+                    *end,
+                    *color,
+                    end_marker.as_ref(),
+                    &mut line_verts,
+                    &mut mesh_verts,
+                );
             }
-            DebugTask::Box { center, half_extents, rotation, color } => {
+            DebugTask::Box {
+                center,
+                half_extents,
+                rotation,
+                color,
+            } => {
                 tessellate_box(*center, *half_extents, *rotation, *color, &mut mesh_verts);
             }
-            DebugTask::Sphere { center, radius, color } => {
+            DebugTask::Sphere {
+                center,
+                radius,
+                color,
+            } => {
                 tessellate_sphere(*center, *radius, *color, &mut mesh_verts);
             }
-            DebugTask::Capsule { start, end, radius, color } => {
+            DebugTask::Capsule {
+                start,
+                end,
+                radius,
+                color,
+            } => {
                 tessellate_capsule(*start, *end, *radius, *color, &mut mesh_verts);
             }
-            DebugTask::Contact { position, normal, color } => {
+            DebugTask::Contact {
+                position,
+                normal,
+                color,
+            } => {
                 tessellate_contact(*position, *normal, *color, &mut line_verts, &mut mesh_verts);
             }
-            DebugTask::Raycast { origin, end, color, hit } => {
-                tessellate_raycast(*origin, *end, *color, *hit, &mut line_verts, &mut mesh_verts);
+            DebugTask::Raycast {
+                origin,
+                end,
+                color,
+                hit,
+            } => {
+                tessellate_raycast(
+                    *origin,
+                    *end,
+                    *color,
+                    *hit,
+                    &mut line_verts,
+                    &mut mesh_verts,
+                );
             }
         }
     }
@@ -776,8 +814,14 @@ fn tessellate_line(
     mesh_verts: &mut Vec<DebugVertex>,
 ) {
     let c = [color[0], color[1], color[2], 1.0];
-    line_verts.push(DebugVertex { position: start, color: c });
-    line_verts.push(DebugVertex { position: end, color: c });
+    line_verts.push(DebugVertex {
+        position: start,
+        color: c,
+    });
+    line_verts.push(DebugVertex {
+        position: end,
+        color: c,
+    });
 
     if let Some(marker) = end_marker {
         let dir = normalize(sub(end, start));
@@ -805,14 +849,29 @@ fn tessellate_end_marker(
                 let base1 = ring_point(position, right, up, *radius, phi1);
 
                 // Side triangle.
-                mesh_verts.push(DebugVertex { position: tip, color });
-                mesh_verts.push(DebugVertex { position: base0, color });
-                mesh_verts.push(DebugVertex { position: base1, color });
+                mesh_verts.push(DebugVertex {
+                    position: tip,
+                    color,
+                });
+                mesh_verts.push(DebugVertex {
+                    position: base0,
+                    color,
+                });
+                mesh_verts.push(DebugVertex {
+                    position: base1,
+                    color,
+                });
 
                 // Base cap triangle.
                 mesh_verts.push(DebugVertex { position, color });
-                mesh_verts.push(DebugVertex { position: base1, color });
-                mesh_verts.push(DebugVertex { position: base0, color });
+                mesh_verts.push(DebugVertex {
+                    position: base1,
+                    color,
+                });
+                mesh_verts.push(DebugVertex {
+                    position: base0,
+                    color,
+                });
             }
         }
         EndMarker::Box { half_extents } => {
@@ -836,14 +895,15 @@ fn tessellate_box(
     // 8 corners in local space, rotated and translated into world space.
     let corners: [[f32; 3]; 8] = [
         [-hx, -hy, -hz],
-        [ hx, -hy, -hz],
-        [ hx,  hy, -hz],
-        [-hx,  hy, -hz],
-        [-hx, -hy,  hz],
-        [ hx, -hy,  hz],
-        [ hx,  hy,  hz],
-        [-hx,  hy,  hz],
-    ].map(|p| add(rotate_point(p, rotation), center));
+        [hx, -hy, -hz],
+        [hx, hy, -hz],
+        [-hx, hy, -hz],
+        [-hx, -hy, hz],
+        [hx, -hy, hz],
+        [hx, hy, hz],
+        [-hx, hy, hz],
+    ]
+    .map(|p| add(rotate_point(p, rotation), center));
 
     // 6 faces as index quads (a, b, c, d) => triangles (a,b,c) and (a,c,d).
     let faces: [[usize; 4]; 6] = [
@@ -892,13 +952,31 @@ fn tessellate_sphere(
             let p11 = sphere_point(center, radius, theta1, phi1);
             let p01 = sphere_point(center, radius, theta0, phi1);
 
-            mesh_verts.push(DebugVertex { position: p00, color });
-            mesh_verts.push(DebugVertex { position: p10, color });
-            mesh_verts.push(DebugVertex { position: p11, color });
+            mesh_verts.push(DebugVertex {
+                position: p00,
+                color,
+            });
+            mesh_verts.push(DebugVertex {
+                position: p10,
+                color,
+            });
+            mesh_verts.push(DebugVertex {
+                position: p11,
+                color,
+            });
 
-            mesh_verts.push(DebugVertex { position: p00, color });
-            mesh_verts.push(DebugVertex { position: p11, color });
-            mesh_verts.push(DebugVertex { position: p01, color });
+            mesh_verts.push(DebugVertex {
+                position: p00,
+                color,
+            });
+            mesh_verts.push(DebugVertex {
+                position: p11,
+                color,
+            });
+            mesh_verts.push(DebugVertex {
+                position: p01,
+                color,
+            });
         }
     }
 }
@@ -927,7 +1005,10 @@ fn tessellate_capsule(
         let angle = std::f32::consts::FRAC_PI_2 * i as f32 / n as f32;
         let ring_radius = radius * angle.sin();
         let offset = -(radius * angle.cos());
-        rings.push(Ring { center: add(start, scale(axis, offset)), radius: ring_radius });
+        rings.push(Ring {
+            center: add(start, scale(axis, offset)),
+            radius: ring_radius,
+        });
     }
 
     // End hemisphere: equator at end, pole at end + axis*radius.
@@ -937,7 +1018,10 @@ fn tessellate_capsule(
         let angle = std::f32::consts::FRAC_PI_2 * i as f32 / n as f32;
         let ring_radius = radius * angle.cos();
         let offset = radius * angle.sin();
-        rings.push(Ring { center: add(end, scale(axis, offset)), radius: ring_radius });
+        rings.push(Ring {
+            center: add(end, scale(axis, offset)),
+            radius: ring_radius,
+        });
     }
 
     // Connect adjacent rings with quads.
@@ -951,13 +1035,31 @@ fn tessellate_capsule(
             let p10 = ring_point(rings[i + 1].center, right, up, rings[i + 1].radius, phi0);
             let p11 = ring_point(rings[i + 1].center, right, up, rings[i + 1].radius, phi1);
 
-            mesh_verts.push(DebugVertex { position: p00, color });
-            mesh_verts.push(DebugVertex { position: p10, color });
-            mesh_verts.push(DebugVertex { position: p11, color });
+            mesh_verts.push(DebugVertex {
+                position: p00,
+                color,
+            });
+            mesh_verts.push(DebugVertex {
+                position: p10,
+                color,
+            });
+            mesh_verts.push(DebugVertex {
+                position: p11,
+                color,
+            });
 
-            mesh_verts.push(DebugVertex { position: p00, color });
-            mesh_verts.push(DebugVertex { position: p11, color });
-            mesh_verts.push(DebugVertex { position: p01, color });
+            mesh_verts.push(DebugVertex {
+                position: p00,
+                color,
+            });
+            mesh_verts.push(DebugVertex {
+                position: p11,
+                color,
+            });
+            mesh_verts.push(DebugVertex {
+                position: p01,
+                color,
+            });
         }
     }
 }
@@ -973,26 +1075,53 @@ fn tessellate_contact(
     let s = CONTACT_CROSS_HALF_SIZE;
 
     // 3D cross: one line pair per axis.
-    line_verts.push(DebugVertex { position: [position[0] - s, position[1], position[2]], color: c });
-    line_verts.push(DebugVertex { position: [position[0] + s, position[1], position[2]], color: c });
+    line_verts.push(DebugVertex {
+        position: [position[0] - s, position[1], position[2]],
+        color: c,
+    });
+    line_verts.push(DebugVertex {
+        position: [position[0] + s, position[1], position[2]],
+        color: c,
+    });
 
-    line_verts.push(DebugVertex { position: [position[0], position[1] - s, position[2]], color: c });
-    line_verts.push(DebugVertex { position: [position[0], position[1] + s, position[2]], color: c });
+    line_verts.push(DebugVertex {
+        position: [position[0], position[1] - s, position[2]],
+        color: c,
+    });
+    line_verts.push(DebugVertex {
+        position: [position[0], position[1] + s, position[2]],
+        color: c,
+    });
 
-    line_verts.push(DebugVertex { position: [position[0], position[1], position[2] - s], color: c });
-    line_verts.push(DebugVertex { position: [position[0], position[1], position[2] + s], color: c });
+    line_verts.push(DebugVertex {
+        position: [position[0], position[1], position[2] - s],
+        color: c,
+    });
+    line_verts.push(DebugVertex {
+        position: [position[0], position[1], position[2] + s],
+        color: c,
+    });
 
     // Normal arrow: line to tip then a cone.
     let dir = normalize(normal);
     let tip = add(position, scale(dir, CONTACT_NORMAL_LENGTH));
 
-    line_verts.push(DebugVertex { position: position, color: c });
-    line_verts.push(DebugVertex { position: tip, color: c });
+    line_verts.push(DebugVertex {
+        position: position,
+        color: c,
+    });
+    line_verts.push(DebugVertex {
+        position: tip,
+        color: c,
+    });
 
     tessellate_end_marker(
         tip,
         dir,
-        &EndMarker::Cone { length: s * 0.8, radius: s * 0.4 },
+        &EndMarker::Cone {
+            length: s * 0.8,
+            radius: s * 0.4,
+        },
         c,
         mesh_verts,
     );
@@ -1008,8 +1137,14 @@ fn tessellate_raycast(
 ) {
     let c = [color[0], color[1], color[2], 1.0];
 
-    line_verts.push(DebugVertex { position: origin, color: c });
-    line_verts.push(DebugVertex { position: end, color: c });
+    line_verts.push(DebugVertex {
+        position: origin,
+        color: c,
+    });
+    line_verts.push(DebugVertex {
+        position: end,
+        color: c,
+    });
 
     if hit {
         tessellate_sphere(end, RAYCAST_HIT_RADIUS, c, mesh_verts);

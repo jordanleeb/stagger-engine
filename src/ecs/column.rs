@@ -447,14 +447,18 @@ impl Column {
         true
     }
 
-    /// Reads and returns the value at `index` without modifying the column length.
-    /// 
-    /// After this call the slot at `index` is logically uninitialized.
-    /// The caller is responsible for ensuring the slot is compacted or
-    /// the length is adjusted before the column is used again.
-    /// 
-    /// Returns `None` if `index` is out of bounds or the type does not match.
-    pub(crate) fn read_value_at<T: 'static>(&self, index: usize) -> Option<T> {
+    /// Moves the value at `index` out of the column without compacting or
+    /// shrinking the column.
+    ///
+    /// After this call:
+    /// - The slot at `index` is logically uninitialized.
+    /// - The column length is unchanged.
+    ///
+    /// The caller is responsible for compacting or shrinking the column before it
+    /// is used again.
+    ///
+    /// Returns `None` if `index` is out of bounds.
+    pub(crate) fn take_without_compacting<T: 'static>(&mut self, index: usize) -> Option<T> {
         self.assert_type::<T>();
 
         if index >= self.len {

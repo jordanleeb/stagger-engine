@@ -5,13 +5,13 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
+use crate::ecs::world::World;
 use crate::render::camera::{ActiveCamera, Camera};
+use crate::render::debug::DebugDraw;
 use crate::render::material::Material;
 use crate::render::mesh::{Mesh, Vertex};
 use crate::render::renderer::Renderer;
 use crate::render::transform::Transform;
-use crate::ecs::world::World;
-use crate::render::debug::DebugDraw;
 
 /// Owns the window and renderer, and responds to OS events.
 pub struct App {
@@ -58,9 +58,18 @@ impl ApplicationHandler for App {
 
         // Upload the test triangle mesh.
         let triangle_id = renderer.upload_mesh(&[
-            Vertex { position: [0.0,  0.5, 0.0], color: [1.0, 0.0, 0.0] },
-            Vertex { position: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
-            Vertex { position: [0.5, -0.5, 0.0], color: [0.0, 0.0, 1.0] },
+            Vertex {
+                position: [0.0, 0.5, 0.0],
+                color: [1.0, 0.0, 0.0],
+            },
+            Vertex {
+                position: [-0.5, -0.5, 0.0],
+                color: [0.0, 1.0, 0.0],
+            },
+            Vertex {
+                position: [0.5, -0.5, 0.0],
+                color: [0.0, 0.0, 1.0],
+            },
         ]);
 
         self.world.insert_resource(renderer);
@@ -68,12 +77,16 @@ impl ApplicationHandler for App {
 
         // Spawn the camera entity.
         let camera = self.world.spawn();
-        self.world.add_component(camera, Transform {
-            position: [0.0, 0.0, 3.0],
-            rotation: [0.0, 0.0, 0.0],
-            scale: [1.0, 1.0, 1.0],
-        });
-        self.world.add_component(camera, Camera::default_perspective());
+        self.world.add_component(
+            camera,
+            Transform {
+                position: [0.0, 0.0, 3.0],
+                rotation: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+            },
+        );
+        self.world
+            .add_component(camera, Camera::default_perspective());
         self.world.insert_resource(ActiveCamera::new(camera));
 
         // Spawn a test entity at the origin with the triangle mesh
@@ -109,7 +122,10 @@ impl ApplicationHandler for App {
                         [-1.0, 0.0, 0.0],
                         [1.0, 0.0, 0.0],
                         [1.0, 1.0, 0.0],
-                        Some(crate::render::debug::EndMarker::Cone { length: 0.1, radius: 0.05 }),
+                        Some(crate::render::debug::EndMarker::Cone {
+                            length: 0.1,
+                            radius: 0.05,
+                        }),
                     );
                     debug.draw_box(
                         [0.0, 0.5, 0.0],
@@ -118,7 +134,12 @@ impl ApplicationHandler for App {
                         [0.0, 1.0, 0.0, 0.3],
                     );
                     debug.draw_sphere([-0.5, 0.0, 0.0], 0.2, [0.0, 0.5, 1.0, 0.3]);
-                    debug.draw_capsule([0.5, -0.3, 0.0], [0.5, 0.3, 0.0], 0.1, [1.0, 0.0, 0.5, 0.3]);
+                    debug.draw_capsule(
+                        [0.5, -0.3, 0.0],
+                        [0.5, 0.3, 0.0],
+                        0.1,
+                        [1.0, 0.0, 0.5, 0.3],
+                    );
                     debug.draw_contact([0.0, -0.3, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]);
                     debug.draw_raycast([-1.0, -0.5, 0.0], [0.3, -0.5, 0.0], [1.0, 0.5, 0.0], true);
                 }

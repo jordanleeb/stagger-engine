@@ -103,10 +103,13 @@ impl MeshStore {
         let id = self.next_id;
         self.next_id += 1;
 
-        self.meshes.insert(id, GpuMesh {
-            buffer,
-            vertex_count: vertices.len() as u32,
-        });
+        self.meshes.insert(
+            id,
+            GpuMesh {
+                buffer,
+                vertex_count: vertices.len() as u32,
+            },
+        );
 
         id
     }

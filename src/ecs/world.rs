@@ -321,6 +321,44 @@ impl World {
         Some((source_id, source_row, result))
     }
 
+    fn transfer_entity_row_and_take<T: 'static>(
+        &mut self,
+        entity: Entity,
+        destination_archetype: ArchetypeId,
+        taken_id: ComponentId,
+    ) -> Option<(ArchetypeId, usize, RowMoveResult, T)> {
+        if !self.is_alive(entity) {
+            return None;
+        }
+
+        let source_location = self.location(entity)?;
+        let source_id = source_location.archetype();
+        let source_row = source_location.row();
+
+        if source_id == destination_archetype {
+            return None;
+        }
+
+        let source_index = source_id as usize;
+        let destination_index = destination_archetype as usize;
+
+        let (move_result, value) = if source_index < destination_index {
+            let (left, right) = self.archetypes.split_at_mut(destination_index);
+            let source = &mut left[source_index];
+            let destination = &mut right[0];
+
+            source.move_row_to_and_take::<T>(source_row, destination, taken_id)?
+        } else {
+            let (left, right) = self.archetypes.split_at_mut(source_index);
+            let destination = &mut left[destination_index];
+            let source = &mut right[0];
+
+            source.move_row_to_and_take::<T>(source_row, destination, taken_id)?
+        };
+
+        Some((source_id, source_row, move_result, value))
+    }
+
     fn build_columns_for_signature(&self, signature: &ArchetypeSignature) -> Vec<Column> {
         signature
             .component_ids()
@@ -514,7 +552,7 @@ impl World {
     /// - Verifies the entity currently has the component.
     /// - Computes the destination signature (old - `T`).
     /// - Transfers the entity row and all remaining shared components.
-    /// - Drops the removed component during source-row removal.
+    /// - Moves the removed component out and returns it.
     /// - Updates all affected entity locations.
     ///
     /// Returns `None` if:
@@ -553,12 +591,6 @@ impl World {
             return None;
         }
 
-        let source_row = location.row();
-
-        let value = self.archetypes[source_archetype as usize]
-            .column(component_id)?
-            .read_value_at::<T>(source_row)?;
-
         // Use the cached edge to skip signature computation on repeated transitions.
         let cached = self.archetypes[source_archetype as usize].get_remove_edge(component_id);
         let destination_archetype = match cached {
@@ -575,11 +607,12 @@ impl World {
             }
         };
 
-        let (actual_source_archetype, old_source_row, move_result) =
-            match self.transfer_entity_row(entity, destination_archetype, Some(component_id)) {
-                Some(result) => result,
-                None => return None,
-            };
+        let (actual_source_archetype, old_source_row, move_result, value) = match self
+            .transfer_entity_row_and_take::<T>(entity, destination_archetype, component_id)
+        {
+            Some(result) => result,
+            None => return None,
+        };
 
         // Fix the location of any entity that got swap-moved inside the source archetype.
         if let Some(swapped_entity) = move_result.swapped_entity {
@@ -1377,5 +1410,46 @@ mod tests {
         world.insert_resource(10_u32);
         *world.get_resource_mut::<u32>().unwrap() = 99;
         assert_eq!(world.get_resource::<u32>(), Some(&99));
+    }
+
+    #[test]
+    fn remove_component_returns_drop_type_without_dropping_it() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        struct DropCounter {
+            value: u32,
+            drops: Rc<Cell<usize>>,
+        }
+
+        impl Drop for DropCounter {
+            fn drop(&mut self) {
+                self.drops.set(self.drops.get() + 1);
+            }
+        }
+
+        let drops = Rc::new(Cell::new(0));
+
+        let mut world = World::new();
+        world.register_component::<DropCounter>();
+
+        let entity = world.spawn();
+
+        assert!(world.add_component(
+            entity,
+            DropCounter {
+                value: 42,
+                drops: Rc::clone(&drops),
+            },
+        ));
+
+        let removed = world.remove_component::<DropCounter>(entity).unwrap();
+
+        assert_eq!(removed.value, 42);
+        assert_eq!(drops.get(), 0);
+
+        drop(removed);
+
+        assert_eq!(drops.get(), 1);
     }
 }

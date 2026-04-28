@@ -16,6 +16,8 @@ impl Material {
 
     /// Creates a white material that leaves per-vertex color unchanged.
     pub fn white() -> Self {
-        Self { color: [1.0, 1.0, 1.0] }
+        Self {
+            color: [1.0, 1.0, 1.0],
+        }
     }
 }

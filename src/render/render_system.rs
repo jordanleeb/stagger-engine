@@ -1,10 +1,10 @@
+use crate::ecs::world::World;
 use crate::render::camera::{ActiveCamera, Camera};
 use crate::render::debug::DebugDraw;
 use crate::render::material::Material;
 use crate::render::mesh::Mesh;
 use crate::render::renderer::{DrawCall, Renderer};
 use crate::render::transform::Transform;
-use crate::ecs::world::World;
 
 /// Draws one mesh per entity that has a Transform, Mesh, and Material component.
 ///
@@ -62,25 +62,27 @@ pub fn render_system(world: &mut World) {
         query
             .iter()
             .map(|row| {
-                let model_matrix = row.get::<Transform>(transform_id)
+                let model_matrix = row
+                    .get::<Transform>(transform_id)
                     .unwrap()
                     .to_model_matrix();
 
-                let mesh_id = row.get::<Mesh>(mesh_component_id)
-                    .unwrap()
-                    .id;
+                let mesh_id = row.get::<Mesh>(mesh_component_id).unwrap().id;
 
-                let material_color = row.get::<Material>(material_id)
-                    .unwrap()
-                    .color;
+                let material_color = row.get::<Material>(material_id).unwrap().color;
 
-                DrawCall { model_matrix, material_color, mesh_id }
+                DrawCall {
+                    model_matrix,
+                    material_color,
+                    mesh_id,
+                }
             })
             .collect()
     };
 
     // Take all pending debug tasks, leaving the buffer empty for the next frame.
-    let debug_tasks = world.get_resource_mut::<DebugDraw>()
+    let debug_tasks = world
+        .get_resource_mut::<DebugDraw>()
         .map(|d| d.take())
         .unwrap_or_default();
 
